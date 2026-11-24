@@ -40,6 +40,11 @@
   #log td:last-child { text-align: right; }
   #log .muted { opacity: .65; }
   #log button { margin-top: 12px; font: inherit; font-size: 11px; color: #fff; background: none; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+  /* heart-rate glow round the edge of the screen: colour of the zone, beating with the heart */
+  #pulse { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1.5s; --k: 0; --c: 143, 209, 158;
+    box-shadow: inset 0 0 calc(40px + 110px * var(--k)) calc(2px + 34px * var(--k)) rgba(var(--c), calc(.25 + .55 * var(--k)));
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(var(--c), calc(.12 * var(--k))) 100%); }
+  #pulse.on { opacity: 1; }
   body.clean #hud, body.clean #ctl, body.clean #log, body.clean #credit { display: none; }
   body.clean { cursor: none; }
   #credit { position: fixed; right: 14px; bottom: 10px; font-size: 10px; letter-spacing: .04em; opacity: .7; text-shadow: 0 1px 6px rgba(0,0,0,.7); max-width: 46vw; text-align: right; }
@@ -53,6 +58,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="pulse"></div>
 <div id="hud">
   <div><b id="h-pw">220</b><span>watts</span></div>
   <div id="h-hr-box" hidden><b id="h-hr">–</b><span id="h-hz">bpm</span></div>
@@ -1687,6 +1693,7 @@ const SCENE_PLAN = XMAS ? [['snow', 280], ['mist', 100], ['snow', 180], ['golden
 let scene_t = 0, scene_i = 0;
 if (SCENERY !== null) { setClean(true); st.target = st.power = 90; if (SCENERY === 'nobars') rig.visible = false; }
 
+const pulse = { ph: 0, c: null };
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   uTime.value += dt;
@@ -1746,6 +1753,21 @@ function tick() {
     audio.wind.f.frequency.setTargetAtTime(300 + st.v * 40, t, 0.2);
     audio.tyre.g.gain.setTargetAtTime(Math.min(0.35, st.v / 15 * 0.25), t, 0.2);
     audio.rain.g.gain.setTargetAtTime(wx.rain * 0.1, t, 0.4);
+  }
+
+  // heart-rate glow: one lub-dub per beat, stronger in the higher zones; the colour slides to the new zone
+  {
+    const bpm = st.hr && performance.now() - st.hrAt < 5000 ? st.hr : 0, el = $('pulse');
+    el.classList.toggle('on', !!bpm);
+    if (bpm) {
+      const z = hrZone(bpm), to = ZONE_COL[z].match(/\w\w/g).map(h => parseInt(h, 16));
+      pulse.c = pulse.c ? pulse.c.map((v, i) => v + (to[i] - v) * Math.min(1, dt * 2)) : to;
+      pulse.ph = (pulse.ph + dt * bpm / 60) % 1;
+      const p = pulse.ph, beat = Math.exp(-p * 9) + (p > 0.2 ? 0.55 * Math.exp(-(p - 0.2) * 11) : 0);
+      const k = [0, 0.22, 0.32, 0.48, 0.7, 1][z] * Math.min(1, beat);
+      el.style.setProperty('--k', k.toFixed(3));
+      el.style.setProperty('--c', pulse.c.map(Math.round).join(', '));
+    }
   }
 
   huT -= dt;
