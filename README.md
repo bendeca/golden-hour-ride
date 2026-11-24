@@ -11,6 +11,7 @@ Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-h
 - Skip forward and back 250 m with the arrow keys.
 - Hide everything on screen for a clean view: the Hide info button, the H key, or say "hide". Press H, click, or say "show" to bring it back.
 - Power from a slider, or from a Bluetooth trainer (Chrome or Edge). If the trainer supports resistance control (FTMS), the ride also sends it the road gradient, so climbs feel harder; the button shows "Trainer: power and gradient" or "Trainer: power only". The trainer feels half the road gradient by default; the − and + buttons beside the trainer button change that in steps of 10 %, from off to the full gradient, and the choice is kept in the browser (`?hills=` sets it for one visit). With voice on, say "easier" or "harder" to move it by 20 %, "flat" for off, or "full" for all of it. The last trainer is remembered: the button reads "Reconnect trainer" and rejoins it without the browser's device list where Chrome allows that, and a dropped connection is retried automatically.
+- Heart rate from a Bluetooth strap or watch that broadcasts it (Chrome or Edge): the Connect HR button, separate from the trainer. Once connected, bpm shows in the HUD and on the head unit, and each ride in the log keeps its average heart rate. The strap is remembered and reconnected like the trainer.
 - Descents count half in the speed model and the rider brakes above 54 km/h, so downhill speed stays sensible.
 
 ## Run it locally

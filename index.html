@@ -52,6 +52,7 @@
 <canvas id="c"></canvas>
 <div id="hud">
   <div><b id="h-pw">220</b><span>watts</span></div>
+  <div id="h-hr-box" hidden><b id="h-hr">–</b><span>bpm</span></div>
   <div><b id="h-sp">0.0</b><span>km/h</span></div>
   <div><b id="h-gr">0.0</b><span>gradient %</span></div>
   <div><b id="h-di">0.00</b><span>km</span></div>
@@ -65,6 +66,7 @@
   <button id="course" title="Switch between the invented valley and the real Leckhampton Hill loop">Course</button>
   <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
   <button id="bt">Connect trainer</button>
+  <button id="hr" title="A Bluetooth heart-rate strap or watch that broadcasts heart rate">Connect HR</button>
   <span id="hills" title="How much of each hill a smart trainer makes you feel. Turn it down if the climbs are too hard; 0 % is flat."><button id="hless" aria-label="Make hills easier">−</button><span id="hval">Hills 50 %</span><button id="hmore" aria-label="Make hills harder">+</button></span>
   <button id="clean" title="Hide everything on screen (H key, or say “hide”). Press H, click, or say “show” to bring it back">Hide info</button>
   <button id="logbtn" title="Distance you have ridden, kept in this browser">Log</button>
@@ -1219,14 +1221,16 @@ const huTex = new THREE.CanvasTexture(huC); huTex.colorSpace = THREE.SRGBColorSp
   const tyre = new THREE.Mesh(new THREE.TorusGeometry(0.335, 0.014, 10, 72), tape); tyre.rotation.y = Math.PI / 2; tyre.position.set(0, -0.66, -0.12); rig.add(tyre);
   rig.traverse(o => { if (o.isMesh && o !== screen) o.receiveShadow = true; });
 }
-function drawHeadUnit(kmh, w) {
+function drawHeadUnit(kmh, w, bpm) {
   huG.fillStyle = '#d9dccf'; huG.fillRect(0, 0, 128, 224);
   huG.fillStyle = '#16181a'; huG.textAlign = 'center';
-  huG.font = '600 58px Helvetica, Arial, sans-serif'; huG.fillText(kmh.toFixed(0), 64, 82);
-  huG.font = '600 13px Helvetica, Arial, sans-serif'; huG.fillText('KM/H', 64, 104);
-  huG.fillRect(14, 122, 100, 2);
-  huG.font = '600 40px Helvetica, Arial, sans-serif'; huG.fillText(w.toFixed(0), 64, 176);
-  huG.font = '600 13px Helvetica, Arial, sans-serif'; huG.fillText('WATTS', 64, 198);
+  const y = bpm ? -14 : 0;                           // with heart rate, everything moves up to make room for it
+  huG.font = '600 58px Helvetica, Arial, sans-serif'; huG.fillText(kmh.toFixed(0), 64, 82 + y);
+  huG.font = '600 13px Helvetica, Arial, sans-serif'; huG.fillText('KM/H', 64, 104 + y);
+  huG.fillRect(14, 120 + y, 100, 2);
+  huG.font = '600 40px Helvetica, Arial, sans-serif'; huG.fillText(w.toFixed(0), 64, 166 + y * 1.6);
+  huG.font = '600 13px Helvetica, Arial, sans-serif'; huG.fillText('WATTS', 64, 186 + y * 1.6);
+  if (bpm) { huG.font = '600 22px Helvetica, Arial, sans-serif'; huG.fillText('\u2665 ' + bpm.toFixed(0), 64, 208); }
   huTex.needsUpdate = true;
 }
 
@@ -1317,7 +1321,7 @@ addEventListener('resize', () => {
 
 /* ---------- input: keys, slider, smart trainer ---------- */
 const START = real ? 850 : 0;          // Leckhampton: begin on the lane about 150 m below where the hill steepens, not out in the vale
-const st = { s: START, v: 6, power: 220, target: 220, dist: 0, trainer: false };
+const st = { s: START, v: 6, power: 220, target: 220, dist: 0, trainer: false, hr: 0, hrAt: 0 };
 window.ride = st; st.haze = hazeCol; st.built = st0;
 st.goNear = (x, z) => { let b = 0, bd = 1e12; for (let i = 0; i < N; i++) { const d = (P[i].x - x) ** 2 + (P[i].z - z) ** 2; if (d < bd) { bd = d; b = i; } } st.s = Math.max(0, b * LEN / N - 60); return Math.round(Math.sqrt(bd)); };   // for checking: ride to the road nearest a point
 st.weather = (n, i) => setWeather(n, i);
@@ -1487,11 +1491,80 @@ $('bt').addEventListener('click', async () => {
 btLabel();
 setHills(HILLS * 100);
 
+/* Heart-rate strap or watch: the standard Heart Rate service, read only. A separate device from the trainer,
+   with its own button; remembered and reconnected the same way. */
+const hrm = { dev: null, known: null, tries: 0, busyJoin: false };
+const HR_KEY = 'golden-hour-ride-hr';               // the last strap used: { id, name }, kept in this browser
+const lastHR = () => { try { return JSON.parse(localStorage.getItem(HR_KEY)) || null; } catch { return null; } };
+// Heart Rate Measurement: flags byte, then the rate as one byte, or two (little-endian) if flag bit 0 is set
+const parseHR = d => d.byteLength < 2 ? 0 : (d.getUint8(0) & 1 ? (d.byteLength < 3 ? 0 : d.getUint16(1, true)) : d.getUint8(1));
+window.parseHR = parseHR;                           // for checking
+const hrLabel = () => {
+  $('hr').textContent = hrm.dev ? 'HR: ' + (hrm.dev.name || 'connected')
+    : hrm.known || (lastHR() && navigator.bluetooth && navigator.bluetooth.getDevices) ? 'Reconnect HR' : 'Connect HR';
+};
+const hrWatched = new WeakSet();
+async function useHR(dev) {
+  let server;
+  try { server = await within(dev.gatt.connect(), 8000); }
+  catch (err) { try { dev.gatt.disconnect(); } catch {} throw err; }
+  const ch = await (await server.getPrimaryService('heart_rate')).getCharacteristic('heart_rate_measurement');
+  await ch.startNotifications();
+  ch.addEventListener('characteristicvaluechanged', e => {
+    const b = parseHR(e.target.value);
+    if (b > 0 && b < 255) { st.hr = b; st.hrAt = performance.now(); }   // 0: strap not on skin
+  });
+  if (!hrWatched.has(dev)) {
+    hrWatched.add(dev);
+    dev.addEventListener('gattserverdisconnected', () => { st.hr = 0; hrm.dev = null; hrLabel(); rejoinHR(dev); });
+  }
+  hrm.dev = hrm.known = dev; hrm.tries = 0;
+  try { localStorage.setItem(HR_KEY, JSON.stringify({ id: dev.id, name: dev.name || '' })); } catch {}
+  $('h-hr-box').hidden = false;
+  hrLabel();
+}
+async function rejoinHR(dev) {
+  while (!hrm.dev && hrm.known === dev && hrm.tries < 6) {
+    hrm.tries++; $('hr').textContent = 'Reconnecting…';
+    await new Promise(r => setTimeout(r, 2500));
+    if (hrm.dev || hrm.known !== dev) return;
+    try { await useHR(dev); return; } catch (err) { hrm.dev = null; }
+  }
+  hrLabel();
+}
+$('hr').addEventListener('click', async () => {
+  if (!navigator.bluetooth) { $('hr').textContent = 'Needs Chrome or Edge'; return; }
+  if (hrm.busyJoin) return;
+  hrm.busyJoin = true; hrm.tries = 99;
+  try {
+    if (!hrm.dev) {
+      // only a strap: the trainer is also a device this browser knows, so pick by the saved id
+      const last = lastHR(), list = hrm.known ? [hrm.known] : [];
+      if (last && navigator.bluetooth.getDevices) {
+        try { for (const d of await navigator.bluetooth.getDevices()) if (d.id === last.id && !list.includes(d)) list.push(d); } catch {}
+      }
+      for (const dev of list) {
+        $('hr').textContent = 'Reconnecting…';
+        try { await useHR(dev); return; } catch (err) { hrm.dev = null; }
+      }
+    }
+    hrLabel();
+    const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: ['heart_rate'] }] });
+    $('hr').textContent = 'Connecting…';
+    if (hrm.dev && hrm.dev !== dev) { const old = hrm.dev; hrm.known = dev; try { old.gatt.disconnect(); } catch {} }
+    await useHR(dev);
+  } catch (err) { hrLabel(); }
+  finally { hrm.busyJoin = false; }
+});
+hrLabel();
+
 /* ---------- ride log: distance ridden, kept in this browser (localStorage) ---------- */
 {
   const KEY = 'golden-hour-ride-log', MIN = 100;         // rides under 100 m are not kept
   const load = () => { try { const a = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(a) ? a : []; } catch { return []; } };
   const ride = { t: new Date().toISOString(), c: COURSE, m: 0, s: 0 };
+  let hrSum = 0, hrN = 0;                                  // average heart rate, from one sample a second while a strap is on
+  setInterval(() => { if (st.hr && performance.now() - st.hrAt < 5000) { hrSum += st.hr; hrN++; ride.hr = Math.round(hrSum / hrN); } }, 1000);
   let last = performance.now(), ok = true;
   const save = () => {
     const now = performance.now();
@@ -1507,7 +1580,7 @@ setHills(HILLS * 100);
   const draw = () => {
     const all = load().filter(r => r.t !== ride.t); if (st.dist >= MIN) all.push({ ...ride, m: Math.round(st.dist) });
     const today = new Date().toDateString(), sum = f => all.filter(f).reduce((a, r) => a + r.m, 0);
-    const rows = all.slice(-10).reverse().map(r => `<tr><td>${day(r.t)}</td><td class="muted">${r.c === 'leckhampton' ? 'Leckhampton' : 'Alps'}</td><td class="muted">${mins(r.s)}</td><td>${km(r.m)} km</td></tr>`).join('');
+    const rows = all.slice(-10).reverse().map(r => `<tr><td>${day(r.t)}</td><td class="muted">${r.c === 'leckhampton' ? 'Leckhampton' : 'Alps'}</td><td class="muted">${mins(r.s)}</td><td class="muted">${r.hr ? r.hr + ' bpm' : ''}</td><td>${km(r.m)} km</td></tr>`).join('');
     box.innerHTML = `<h3>Ride log</h3><div class="tot"><div><b>${km(sum(r => new Date(r.t).toDateString() === today))}</b><span>km today</span></div>` +
       `<div><b>${km(sum(() => true))}</b><span>km in total</span></div><div><b>${all.length}</b><span>rides</span></div></div>` +
       (rows ? `<table>${rows}</table>` : `<div class="muted">Rides appear here after the first 100 m.</div>`) +
@@ -1647,7 +1720,9 @@ function tick() {
   huT -= dt;
   if (huT <= 0) {
     huT = 0.25;
-    drawHeadUnit(st.v * 3.6, st.power);
+    const bpm = st.hr && performance.now() - st.hrAt < 5000 ? st.hr : 0;    // nothing heard for 5 s: show a dash
+    drawHeadUnit(st.v * 3.6, st.power, bpm);
+    $('h-hr').textContent = bpm ? bpm.toFixed(0) : '–';
     $('h-pw').textContent = st.power.toFixed(0);
     $('h-sp').textContent = (st.v * 3.6).toFixed(1);
     $('h-gr').textContent = (grade >= 0 ? '+' : '') + grade.toFixed(1);
