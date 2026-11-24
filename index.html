@@ -72,7 +72,7 @@
   <span>↑ ↓ keys</span>
   <button id="skip" title="Jump 250 m up the road (→ key; ← goes back)">Skip 250 m ›</button>
   <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full">Voice: off</button>
-  <button id="course" title="Switch between the invented valley and the real Leckhampton Hill loop">Course</button>
+  <button id="course" title="Switch between the invented valley and the real courses: Leckhampton Hill, and the Gempen loop above Basel">Course</button>
   <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
   <button id="bt">Connect trainer</button>
   <button id="hr" title="A Bluetooth heart-rate strap or watch that broadcasts heart rate">Connect HR</button>
@@ -155,9 +155,11 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.05, 9000);
 scene.add(camera);
 
+/* real courses, built from survey data by the scripts in tools/: ?course=<key> */
+const COURSES = { leckhampton: { name: 'Leckhampton', loading: 'Building Leckhampton Hill…' }, basel: { name: 'Gempen', loading: 'Building the Gempen loop…' } };
 /* ---------- sky, sun, haze ---------- */
 // ?theme=christmas: the same valley under snow at dusk, with lights in the trees and a few chalets
-const XMAS = new URLSearchParams(location.search).get('theme') === 'christmas' && new URLSearchParams(location.search).get('course') !== 'leckhampton';
+const XMAS = new URLSearchParams(location.search).get('theme') === 'christmas' && !COURSES[new URLSearchParams(location.search).get('course')];
 const SUN_ELEV = XMAS ? 4.5 : 11, SUN_AZ = -24;
 const sunDir = new V3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - SUN_ELEV), THREE.MathUtils.degToRad(SUN_AZ));
 const sunFlat = new V3(sunDir.x, 0, sunDir.z).normalize();
@@ -206,13 +208,13 @@ const hemi = new THREE.HemisphereLight(XMAS ? 0xa6b4ea : 0xa9b8ee, XMAS ? 0x9aa2
 scene.add(hemi);
 
 /* ---------- course: the invented valley, or a real road built from survey data ---------- */
-const COURSE = new URLSearchParams(location.search).get('course') === 'leckhampton' ? 'leckhampton' : 'valley';
+const COURSE = COURSES[new URLSearchParams(location.search).get('course')] ? new URLSearchParams(location.search).get('course') : 'valley';
 // Scenery mode (?scenery): the ride drifts along on its own at a gentle pace with nothing on screen and the weather
 // slowly changing, for leaving on in the background. ?scenery=nobars also hides the handlebars.
 const SCENERY = new URLSearchParams(location.search).get('scenery');
 let real = null;
 if (COURSE !== 'valley') {
-  $('loading').textContent = 'Building Leckhampton Hill…';
+  $('loading').textContent = COURSES[COURSE].loading;
   const addScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('missing ' + src)); document.head.append(s); });
   const DATA = 3;          // bump when the course files change, so browsers don't reuse an old copy
   await addScript(`assets/${COURSE}.js?v=${DATA}`);
@@ -229,8 +231,11 @@ if (COURSE !== 'valley') {
   real.h = Float32Array.from(q, v => real.demMin + v / 65535 * (real.demMax - real.demMin));     // surveyed ground heights, metres
   $('credit').textContent = real.credit + ' ' + real.osm.credit;
 }
-$('course').textContent = real ? 'Course: Leckhampton' : 'Course: Valley';
-$('course').addEventListener('click', () => { location.search = real ? '' : '?course=leckhampton'; });
+$('course').textContent = 'Course: ' + (real ? COURSES[COURSE].name : 'Valley');
+$('course').addEventListener('click', () => {          // valley, then each real course in turn
+  const order = ['valley', ...Object.keys(COURSES)], next = order[(order.indexOf(COURSE) + 1) % order.length];
+  location.search = next === 'valley' ? '' : '?course=' + next;
+});
 function demH(x, z) {                 // the real ground under a point
   const g = real.cells, w = g + 1, f = v => Math.min(g - 1e-6, Math.max(0, (v + real.size / 2) / (real.size / g)));
   const fx = f(x), fz = f(z), ix = Math.floor(fx), iz = Math.floor(fz), u = fx - ix, v = fz - iz, h = real.h;
@@ -953,7 +958,7 @@ if (real && real.osm.buildings.length) {
   const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
   const walls = new THREE.InstancedMesh(box, wallMat, B.length), pitched = new THREE.InstancedMesh(hip, roofMat, B.length), flat = new THREE.InstancedMesh(box, roofMat, B.length);
   let np = 0, nf = 0, nw = 0;
-  const SHOW_TOWN = false;     // 19th-century Leckhampton: a village among fields, so the modern town is left out
+  const SHOW_TOWN = false;     // 19th-century dressing on every real course: villages among fields, so the modern town is left out
   const KEEP_OUT = 150;        // simple house shapes only hold up at a distance, so none are drawn near the road
   const farFromRoad = (x, z) => { for (let k = 0; k < N; k += 8) { const ex = P[k].x - x, ez = P[k].z - z; if (ex * ex + ez * ez < KEEP_OUT * KEEP_OUT) return false; } return true; };
   B.forEach(([x, z, w, d, ang, h, roof]) => {
@@ -1330,7 +1335,8 @@ addEventListener('resize', () => {
 });
 
 /* ---------- input: keys, slider, smart trainer ---------- */
-const START = real ? 850 : 0;          // Leckhampton: begin on the lane about 150 m below where the hill steepens, not out in the vale
+// where the ride begins, metres along the road: from the course file, or for Leckhampton the lane about 150 m below where the hill steepens
+const START = real ? (real.start ?? 850) : 0;
 const st = { s: START, v: 6, power: 220, target: 220, dist: 0, trainer: false, hr: 0, hrAt: 0 };
 window.ride = st; st.haze = hazeCol; st.built = st0;
 st.goNear = (x, z) => { let b = 0, bd = 1e12; for (let i = 0; i < N; i++) { const d = (P[i].x - x) ** 2 + (P[i].z - z) ** 2; if (d < bd) { bd = d; b = i; } } st.s = Math.max(0, b * LEN / N - 60); return Math.round(Math.sqrt(bd)); };   // for checking: ride to the road nearest a point
@@ -1617,7 +1623,7 @@ hrLabel();
   const draw = () => {
     const all = load().filter(r => r.t !== ride.t); if (st.dist >= MIN) all.push({ ...ride, m: Math.round(st.dist) });
     const today = new Date().toDateString(), sum = f => all.filter(f).reduce((a, r) => a + r.m, 0);
-    const rows = all.slice(-10).reverse().map(r => `<tr><td>${day(r.t)}</td><td class="muted">${r.c === 'leckhampton' ? 'Leckhampton' : 'Alps'}</td><td class="muted">${mins(r.s)}</td><td class="muted">${r.hr ? r.hr + ' bpm' : ''}${zoneBar(r.z)}</td><td>${km(r.m)} km</td></tr>`).join('');
+    const rows = all.slice(-10).reverse().map(r => `<tr><td>${day(r.t)}</td><td class="muted">${COURSES[r.c] ? COURSES[r.c].name : 'Alps'}</td><td class="muted">${mins(r.s)}</td><td class="muted">${r.hr ? r.hr + ' bpm' : ''}${zoneBar(r.z)}</td><td>${km(r.m)} km</td></tr>`).join('');
     box.innerHTML = `<h3>Ride log</h3><div class="tot"><div><b>${km(sum(r => new Date(r.t).toDateString() === today))}</b><span>km today</span></div>` +
       `<div><b>${km(sum(() => true))}</b><span>km in total</span></div><div><b>${all.length}</b><span>rides</span></div></div>` +
       (rows ? `<table>${rows}</table>` : `<div class="muted">Rides appear here after the first 100 m.</div>`) +

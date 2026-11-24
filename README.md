@@ -2,11 +2,11 @@
 
 A proof-of-concept indoor cycling ride that runs in the browser (Three.js, one `index.html`).
 
-Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-hour-ride.space.fast/?course=leckhampton
+Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-hour-ride.space.fast/?course=leckhampton · Gempen loop: https://golden-hour-ride.space.fast/?course=basel
 
 ## What's in it
 
-- Two courses: an invented mountain valley, and a real 11.9 km Leckhampton loop built from Environment Agency lidar, dressed as the 19th-century hill (sheep, hay stooks, quarry smoke).
+- Three courses: an invented mountain valley; a real 11.9 km Leckhampton loop built from Environment Agency lidar, dressed as the 19th-century hill (sheep, hay stooks, quarry smoke); and a real 27 km Gempen loop above Basel (`?course=basel`), built from swisstopo heights, with the same 19th-century dressing. Gempen runs from St. Jakob through Dornach, up the Gempenstrasse (about 400 m of climbing, up to 13 %), on to Schönmatt and down to Arlesheim; the ride starts in Dornach, just before the climb. The Course button steps through all three.
 - Four looks: Golden, Overcast, Rain and Mist. Buttons at the top, keys 1–4, or by voice.
 - Skip forward and back 250 m with the arrow keys.
 - Hide everything on screen for a clean view: the Hide info button, the H key, or say "hide". Press H, click, or say "show" to bring it back.
@@ -26,13 +26,13 @@ Then open http://localhost:8791/.
 
 - `index.html` – the whole ride.
 - `assets/` – textures and course data. `textures.js` is an embedded copy of the textures, used only when the page is opened straight from disk.
-- `tools/` – scripts that build the Leckhampton course data.
+- `tools/` – scripts that build the course data. `build_leckhampton.py` and `build_leckhampton_osm.py` build Leckhampton. `build_course.py <course>` and `build_course_osm.py <course>` build Swiss courses (Basel so far); they need `pip install tifffile imagecodecs numpy`, and keep their downloads in `tools/.cache/`.
 - `deploy.sh` – publishes to Spacefast.
 
 ## Credits
 
 - Textures: Poly Haven (CC0).
-- Terrain: Environment Agency LiDAR Composite DTM, Open Government Licence v3.0.
+- Terrain: Environment Agency LiDAR Composite DTM, Open Government Licence v3.0 (Leckhampton); swissALTI3D © swisstopo, open data (Gempen).
 - Roads, woodland and field boundaries: © OpenStreetMap contributors, ODbL.
 - 3D engine: Three.js (MIT), loaded from jsDelivr.
 
@@ -40,4 +40,4 @@ Then open http://localhost:8791/.
 
 The code is released under the MIT licence: see `LICENSE`. Use it, change it, build your own ride.
 
-The MIT licence covers the code only. The course data in `assets/leckhampton.js` and `assets/leckhampton_osm.js` is derived from the sources credited above and stays under their terms: the Open Government Licence v3.0 for the terrain and the ODbL for the OpenStreetMap data. If you share or adapt that data, keep those credits.
+The MIT licence covers the code only. The course data in `assets/leckhampton*.js` and `assets/basel*.js` is derived from the sources credited above and stays under their terms: the Open Government Licence v3.0 for the Leckhampton terrain, swisstopo's open-data terms (credit "© swisstopo") for the Gempen terrain, and the ODbL for the OpenStreetMap data. If you share or adapt that data, keep those credits.
