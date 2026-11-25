@@ -25,7 +25,7 @@ COURSES = {
         'name': 'Muttenz – Gempen',
         # a ridden loop (Strava GPX): Birsfelden – Muttenz – Wartenberg – Sulz – Schartenflue – Gempen – Arlesheim – Münchenstein
         'gpx': 'tools/routes/muttenz.gpx',
-        'start': 0,
+        'start': 4000,           # metres along the track: Muttenz, about 450 m before the climb to Wartenberg
         'margin': 1300,
         'cell': 15,
         'world': True,
