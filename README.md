@@ -6,7 +6,7 @@ Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-h
 
 ## What's in it
 
-- Three courses: an invented mountain valley; a real 11.9 km Leckhampton loop built from Environment Agency lidar, dressed as the 19th-century hill (sheep, hay stooks, quarry smoke); and a real 27 km Gempen loop above Basel (`?course=basel`), built from swisstopo heights, with the same 19th-century dressing. Gempen runs from St. Jakob through Dornach, up the Gempenstrasse (about 400 m of climbing, up to 13 %), on to Schönmatt and down to Arlesheim; the ride starts in Dornach, just before the climb. The Course button steps through all three.
+- Three courses: an invented mountain valley; a real 11.9 km Leckhampton loop built from Environment Agency lidar, dressed as the 19th-century hill (sheep, hay stooks, quarry smoke); and a real 27 km Gempen loop above Basel (`?course=basel`), shown as it is today: the ground is swisstopo's aerial photo, the buildings near the road are swisstopo's 3D models with their real roofs (simple blocks further out, roofs coloured from the photo), and every tree near the road stands where the laser survey found it, at its measured height, with the darker crowns drawn as spruce and fir. Gempen runs from St. Jakob through Dornach, up the Gempenstrasse (about 400 m of climbing, up to 13 %), on to Schönmatt and down to Arlesheim; the ride starts in Dornach, just before the climb. The Course button steps through all three.
 - Four looks: Golden, Overcast, Rain and Mist. Buttons at the top, keys 1–4, or by voice.
 - A course map in the bottom right corner: the whole road from above, north up, with climbs in amber (deeper for steeper), a square where the ride began and an arrow for where you are and which way you are heading. Under it, an elevation profile of the whole course, coloured the same way, with a marker and your current height; the part already ridden is dimmed. Hide info hides both.
 - Skip forward and back 250 m with the arrow keys.
@@ -27,13 +27,14 @@ Then open http://localhost:8791/.
 
 - `index.html` – the whole ride.
 - `assets/` – textures and course data. `textures.js` is an embedded copy of the textures, used only when the page is opened straight from disk.
-- `tools/` – scripts that build the course data. `build_leckhampton.py` and `build_leckhampton_osm.py` build Leckhampton. `build_course.py <course>` and `build_course_osm.py <course>` build Swiss courses (Basel so far); they need `pip install tifffile imagecodecs numpy`, and keep their downloads in `tools/.cache/`.
+- `tools/` – scripts that build the course data. `build_leckhampton.py` and `build_leckhampton_osm.py` build Leckhampton. `build_course.py <course>` builds a Swiss course's road and terrain, then `build_course_world.py <course>` its present-day world (`assets/<course>_ortho.jpg` and `assets/<course>_world.js`); they share `swisstopo.py`, need `pip3 install tifffile imagecodecs numpy pillow`, and keep their downloads in `tools/.cache/` (the world build reads about 2.5 GB the first time, but keeps only what it uses). `build_course_osm.py` is the OpenStreetMap version, for a Swiss course without the world files.
 - `deploy.sh` – publishes to Spacefast.
 
 ## Credits
 
 - Textures: Poly Haven (CC0).
 - Terrain: Environment Agency LiDAR Composite DTM, Open Government Licence v3.0 (Leckhampton); swissALTI3D © swisstopo, open data (Gempen).
+- Gempen aerial photo, buildings and trees: SWISSIMAGE, swissBUILDINGS3D 3.0 and swissSURFACE3D © swisstopo, open data.
 - Roads, woodland and field boundaries: © OpenStreetMap contributors, ODbL.
 - 3D engine: Three.js (MIT), loaded from jsDelivr.
 
@@ -41,4 +42,4 @@ Then open http://localhost:8791/.
 
 The code is released under the MIT licence: see `LICENSE`. Use it, change it, build your own ride.
 
-The MIT licence covers the code only. The course data in `assets/leckhampton*.js` and `assets/basel*.js` is derived from the sources credited above and stays under their terms: the Open Government Licence v3.0 for the Leckhampton terrain, swisstopo's open-data terms (credit "© swisstopo") for the Gempen terrain, and the ODbL for the OpenStreetMap data. If you share or adapt that data, keep those credits.
+The MIT licence covers the code only. The course data in `assets/leckhampton*.js`, `assets/basel*.js` and `assets/basel_ortho.jpg` is derived from the sources credited above and stays under their terms: the Open Government Licence v3.0 for the Leckhampton terrain, swisstopo's open-data terms (credit "© swisstopo") for everything on Gempen (terrain, photo, buildings and trees), and the ODbL for the OpenStreetMap data. If you share or adapt that data, keep those credits.

@@ -4,12 +4,12 @@ Route: OpenStreetMap routing service (car profile) through the course's waypoint
 Heights: swisstopo swissALTI3D (2 m grid, open data, © swisstopo), 1 km tiles found through the STAC API.
   Road profile sampled from the 2 m grid; surrounding terrain at the course's cell size (15 m for Basel).
 Same steps and output format as build_leckhampton.py, which stays the builder for the English course.
-Needs:  pip install tifffile imagecodecs numpy
+Needs:  pip3 install tifffile imagecodecs numpy
 Run from the project folder:  python3 tools/build_course.py basel
 """
-import base64, json, math, os, struct, sys, time, urllib.request, urllib.error
-from concurrent.futures import ThreadPoolExecutor
-import tifffile
+import base64, json, math, os, struct, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from swisstopo import use_cache, get, to_lv95, from_lv95, tile_index, Tiles
 
 COURSES = {
     'basel': {
@@ -19,78 +19,12 @@ COURSES = {
         'start': 6600,           # metres along the route: Dornach, about 500 m before the Gempenstrasse climb starts
         'margin': 1300,          # terrain beyond the road on every side, metres
         'cell': 15,              # 15 m keeps the mesh near Leckhampton's size (693 x 693 against 620 x 620)
+        'world': True,           # present day: aerial photo, 3D buildings and surveyed trees (build_course_world.py)
     },
 }
 COURSE = sys.argv[1] if len(sys.argv) > 1 else 'basel'
 C = COURSES[COURSE]
-CACHE = os.path.join('tools/.cache', COURSE)
-os.makedirs(CACHE, exist_ok=True)
-UA = {'User-Agent': 'golden-hour-ride-poc'}
-STAC = 'https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swissalti3d/items'
-
-def get(url, name):
-    path = os.path.join(CACHE, name)
-    if not os.path.exists(path):
-        for attempt in range(6):
-            try:
-                data = urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=90).read(); break
-            except (urllib.error.URLError, TimeoutError) as ex:
-                if attempt == 5 or (isinstance(ex, urllib.error.HTTPError) and ex.code not in (429, 500, 502, 503, 504)): raise
-                time.sleep(3 + attempt * 3)
-        open(path, 'wb').write(data)
-    return open(path, 'rb').read()
-
-def to_lv95(lat, lon):
-    """WGS84 to Swiss LV95 (E, N), swisstopo's approximate formulas: within about a metre."""
-    p, l = (lat * 3600 - 169028.66) / 10000, (lon * 3600 - 26782.5) / 10000
-    E = 2600072.37 + 211455.93 * l - 10938.51 * l * p - 0.36 * l * p * p - 44.54 * l ** 3
-    N = 1200147.07 + 308807.95 * p + 3745.25 * l * l + 76.63 * p * p - 194.56 * l * l * p + 119.79 * p ** 3
-    return E, N
-
-def from_lv95(E, N):
-    y, x = (E - 2600000) / 1e6, (N - 1200000) / 1e6
-    lon = 2.6779094 + 4.728982 * y + 0.791484 * y * x + 0.1306 * y * x * x - 0.0436 * y ** 3
-    lat = 16.9023892 + 3.238272 * x - 0.270978 * y * y - 0.002528 * x * x - 0.0447 * y * y * x - 0.0140 * x ** 3
-    return lat * 100 / 36, lon * 100 / 36
-
-# ---- swissALTI3D: which 1 km tiles exist, newest survey of each
-def tile_index(E0, N0, E1, N1):
-    (la0, lo0), (la1, lo1) = from_lv95(E0, N0), from_lv95(E1, N1)
-    url = f'{STAC}?bbox={lo0 - 0.01:.4f},{la0 - 0.01:.4f},{lo1 + 0.01:.4f},{la1 + 0.01:.4f}&limit=100'
-    best, page = {}, 0
-    while url:
-        d = json.loads(get(url, f'stac_{round(E0)}_{round(N0)}_{page}.json')); page += 1
-        for f in d['features']:
-            _, year, ij = f['id'].split('_'); i, j = map(int, ij.split('-'))
-            href = next((a['href'] for k, a in f['assets'].items() if k.endswith('.tif') and '_2_2056_' in k), None)
-            if href and (i, j) not in best or href and int(year) > best[(i, j)][0]: best[(i, j)] = (int(year), href)
-        url = next((l['href'] for l in d.get('links', []) if l.get('rel') == 'next'), None)
-    return {k: v[1] for k, v in best.items()}
-
-class Tiles:
-    """swissALTI3D 1 km tiles at 2 m, with bilinear lookup. Tile (i, j) covers E i..i+1 km, N j..j+1 km."""
-    def __init__(self, index): self.index, self.g = index, {}
-    def load(self, k):
-        href = self.index.get(k)
-        if not href: return None
-        try:
-            get(href, os.path.basename(href))
-            return tifffile.imread(os.path.join(CACHE, os.path.basename(href))).astype('float32')
-        except Exception as ex: print('  tile failed', k, ex); return None
-    def need(self, keys):
-        keys = [k for k in keys if k not in self.g]
-        with ThreadPoolExecutor(4) as ex:
-            for k, r in zip(keys, ex.map(self.load, keys)): self.g[k] = r
-    def at(self, E, N):
-        i, j = math.floor(E / 1000), math.floor(N / 1000); d = self.g.get((i, j))
-        if d is None: return None
-        h, w = d.shape
-        x = (E - i * 1000) / 2 - 0.5; y = ((j + 1) * 1000 - N) / 2 - 0.5
-        x0 = max(0, min(w - 2, math.floor(x))); y0 = max(0, min(h - 2, math.floor(y)))
-        u = min(1, max(0, x - x0)); v = min(1, max(0, y - y0))
-        q = [float(d[y0, x0]), float(d[y0, x0 + 1]), float(d[y0 + 1, x0]), float(d[y0 + 1, x0 + 1])]
-        if any(not (-500 < hh < 5000) for hh in q): return None
-        return (q[0] * (1 - u) + q[1] * u) * (1 - v) + (q[2] * (1 - u) + q[3] * u) * v
+use_cache(COURSE)
 
 # ---- route
 W = C['waypoints']
@@ -188,7 +122,7 @@ q = struct.pack('<%dH' % len(grid), *[round((h - lo) / (hi - lo) * 65535) for h 
 # road line in local metres (x east, z south), a control point every 15 m
 road = [[round(line[k][0] - cE, 2), round(hts[k], 2), round(-(line[k][1] - cN), 2)] for k in range(0, len(line) - 1, 3)]
 lat0, lon0 = from_lv95(cE - size / 2, cN - size / 2); lat1, lon1 = from_lv95(cE + size / 2, cN + size / 2)
-course = {'name': C['name'], 'size': size, 'cells': cells, 'origin': [cE, cN], 'crs': 'LV95', 'start': C['start'],
+course = {'name': C['name'], 'size': size, 'cells': cells, 'origin': [cE, cN], 'crs': 'LV95', 'start': C['start'], 'world': C.get('world', False),
           'bounds': [round(lat0, 5), round(lon0, 5), round(lat1, 5), round(lon1, 5)], 'demMin': lo, 'demMax': hi, 'road': road,
           'credit': 'Route © OpenStreetMap contributors. Heights: swissALTI3D © swisstopo.',
           'dem': base64.b64encode(q).decode()}
