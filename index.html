@@ -43,6 +43,25 @@
   #wk .row { display: flex; gap: 6px; margin-top: 8px; }
   #wk button { font: inherit; font-size: 11px; color: #fff; background: rgba(20,16,12,.45); border: 1px solid rgba(255,255,255,.3); border-radius: 999px; padding: 5px 10px; cursor: pointer; }
   #start select { font: inherit; color: #fff; background: rgba(20,16,12,.6); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 8px; max-width: 100%; }
+  #start .pick { font: inherit; font-size: 13px; color: #fff; background: rgba(20,16,12,.55); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+  #start .pick:hover { border-color: #ffcf8f; }
+  /* workout picker: a card per workout, with its power over time */
+  #wkpick { position: fixed; inset: 0; z-index: 30; overflow: auto; padding: 0 16px; background: rgba(11,10,9,.92); backdrop-filter: blur(6px); }
+  #wkpick[hidden] { display: none; }
+  #wkpick .in { max-width: 1080px; margin: 0 auto; padding: 32px 0 48px; }
+  #wkpick .head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  #wkpick h2 { margin: 0; font-size: 24px; font-weight: 300; letter-spacing: 0; text-transform: none; color: #fff; }
+  #wkpick .x { margin-left: auto; font: inherit; font-size: 22px; line-height: 1; width: 38px; height: 38px; border-radius: 50%; color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.3); cursor: pointer; }
+  #wp-types { margin-bottom: 18px; }
+  #wp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  #wp-grid .card { display: block; text-align: left; font: inherit; color: #fff; cursor: pointer; padding: 12px 12px 11px; border-radius: 12px;
+    background: rgba(32,26,20,.85); border: 1px solid rgba(255,255,255,.16); }
+  #wp-grid .card:hover, #wp-grid .card:focus-visible { border-color: #ffcf8f; outline: none; }
+  #wp-grid .card.on { border-color: #ffcf8f; box-shadow: 0 0 0 1px #ffcf8f inset; }
+  #wp-grid svg { display: block; width: 100%; height: 64px; border-radius: 6px; background: rgba(0,0,0,.25); }
+  #wp-grid .ct { margin-top: 9px; font-size: 14px; font-weight: 500; }
+  #wp-grid .cm { margin-top: 3px; font-size: 11px; color: #e8d6bd; opacity: .8; }
+  #wp-grid .none { display: grid; place-items: center; height: 64px; border-radius: 6px; background: rgba(0,0,0,.25); font-size: 12px; color: #e8d6bd; }
   #start .wkab { margin-top: 6px; font-size: 12px; color: #e8d6bd; opacity: .8; line-height: 1.4; }
   #log { position: fixed; top: 64px; right: 18px; width: 270px; max-height: 70vh; overflow: auto; padding: 14px 16px; border-radius: 14px;
     background: rgba(20,16,12,.72); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(8px); font-size: 13px; color: #fff; }
@@ -114,7 +133,7 @@
       <label for="s-maxhr">Maximum heart rate</label><div><input id="s-maxhr" type="number" min="120" max="230" step="1"> <span class="val">bpm, sets the five zones</span></div>
       <label for="s-erg">ERG mode</label><div><input id="s-erg" type="checkbox"> <input id="s-ergw" type="number" min="50" max="600" step="5"> <span class="val">W the trainer holds, whatever the road does</span></div>
       <label for="s-ftp">FTP</label><div><input id="s-ftp" type="number" min="80" max="500" step="5"> <span class="val">W, the power you could hold for about an hour; workouts are set from it</span></div>
-      <label for="s-wk">Workout</label><div><select id="s-wk"></select><div class="wkab" id="s-wkab"></div></div>
+      <label>Workout</label><div><button class="pick" id="s-wkbtn">Choose a workout…</button><div class="wkab" id="s-wkab"></div></div>
       <label for="s-xmas">Christmas</label><div><input id="s-xmas" type="checkbox"> <span class="val">snow, dusk and lights in the trees (valley only)</span></div>
       <label>Scenery mode</label><div class="seg" id="s-scn"><button data-v="">Off</button><button data-v="1">On</button><button data-v="nobars">On, no handlebars</button></div>
     </div>
@@ -123,6 +142,11 @@
     <p class="note">Scenery mode rides itself at a gentle pace with nothing on screen, for leaving on in the background. Connect a smart trainer and a heart-rate strap with the buttons at the top once the ride opens (Chrome or Edge); both are remembered for next time.</p>
   </div>
 </div>
+<div id="wkpick" hidden><div class="in">
+  <div class="head"><h2>Choose a workout</h2><button class="x" id="wp-close" aria-label="Close">×</button></div>
+  <div class="seg" id="wp-types"></div>
+  <div id="wp-grid"></div>
+</div></div>
 <canvas id="c"></canvas>
 <div id="pulse"></div>
 <div id="hud">
@@ -240,24 +264,67 @@ const COURSES = {
 /* Workouts: steps of [minutes, % of FTP at the start, % at the end (a ramp; same as the start if left out), label].
    Riding one puts the trainer in ERG and walks it through the steps; ?workout=<key> picks one. */
 const rep_ = (n, ...steps) => Array.from({ length: n }, () => steps).flat();
+const WK_TYPES = { recovery: 'Recovery', endurance: 'Endurance', tempo: 'Tempo', sweetspot: 'Sweet spot', threshold: 'Threshold', overunder: 'Over-unders', vo2: 'VO2max', vo2short: 'VO2max short intervals' };
 const WORKOUTS = {
-  recovery: { name: 'Recovery spin', about: 'Easy pedalling to loosen the legs: 30 minutes, nothing above 55 %.',
+  recovery: { type: 'recovery', name: 'Recovery spin', about: 'Easy pedalling to loosen the legs: 30 minutes, nothing above 55 %.',
     steps: [[5, 40, 55, 'Warm-up'], [20, 55, 55, 'Easy'], [5, 55, 40, 'Cool-down']] },
-  endurance: { name: 'Endurance', about: 'A steady hour in zone 2, the base everything else is built on.',
+  endurance: { type: 'endurance', name: 'Endurance', about: 'A steady hour in zone 2, the base everything else is built on.',
     steps: [[10, 50, 65, 'Warm-up'], [40, 68, 68, 'Endurance'], [10, 65, 45, 'Cool-down']] },
-  tempo: { name: 'Tempo 3 × 10', about: 'Three 10-minute blocks at a comfortably hard 85 %, 5 easy minutes between.',
+  tempo: { type: 'tempo', name: 'Tempo 3 × 10', about: 'Three 10-minute blocks at a comfortably hard 85 %, 5 easy minutes between.',
     steps: [[10, 50, 70, 'Warm-up'], ...rep_(3, [10, 85, 85, 'Tempo'], [5, 55, 55, 'Easy']), [5, 55, 45, 'Cool-down']] },
-  sweetspot: { name: 'Sweet spot 2 × 20', about: 'Two 20-minute blocks at 90 %: a lot of training for the effort.',
+  sweetspot: { type: 'sweetspot', name: 'Sweet spot 2 × 20', about: 'Two 20-minute blocks at 90 %: a lot of training for the effort.',
     steps: [[10, 50, 75, 'Warm-up'], [20, 90, 90, 'Sweet spot'], [5, 55, 55, 'Easy'], [20, 90, 90, 'Sweet spot'], [10, 60, 45, 'Cool-down']] },
-  threshold: { name: 'Threshold 4 × 8', about: 'Four 8-minute efforts right at FTP, with 4 minutes easy between.',
+  threshold: { type: 'threshold', name: 'Threshold 4 × 8', about: 'Four 8-minute efforts right at FTP, with 4 minutes easy between.',
     steps: [[12, 50, 80, 'Warm-up'], ...rep_(4, [8, 100, 100, 'Threshold'], [4, 55, 55, 'Easy']), [8, 60, 45, 'Cool-down']] },
-  overunder: { name: 'Over-unders 3 × 9', about: 'Three 9-minute blocks switching between 95 % and 105 % each minute or two: learning to settle above threshold.',
+  overunder: { type: 'overunder', name: 'Over-unders 3 × 9', about: 'Three 9-minute blocks switching between 95 % and 105 % each minute or two: learning to settle above threshold.',
     steps: [[12, 50, 80, 'Warm-up'], ...rep_(3, ...rep_(3, [2, 95, 95, 'Under'], [1, 105, 105, 'Over']), [5, 55, 55, 'Easy']), [8, 60, 45, 'Cool-down']] },
-  vo2: { name: 'VO2max 5 × 4', about: 'Five hard 4-minute efforts at 115 %, as long again to recover each time.',
+  vo2: { type: 'vo2', name: 'VO2max 5 × 4', about: 'Five hard 4-minute efforts at 115 %, as long again to recover each time.',
     steps: [[12, 50, 80, 'Warm-up'], [1, 105, 105, 'Opener'], [3, 50, 50, 'Easy'], ...rep_(5, [4, 115, 115, 'VO2max'], [4, 50, 50, 'Recover']), [8, 55, 40, 'Cool-down']] },
-  vo2short: { name: 'VO2max 30/30s', about: 'Two sets of ten: 30 seconds at 125 %, 30 seconds easy. Short, sharp and very hard by the end.',
+  vo2short: { type: 'vo2short', name: 'VO2max 30/30s', about: 'Two sets of ten: 30 seconds at 125 %, 30 seconds easy. Short, sharp and very hard by the end.',
     steps: [[12, 50, 80, 'Warm-up'], ...rep_(10, [0.5, 125, 125, 'On'], [0.5, 50, 50, 'Off']), [6, 50, 50, 'Between sets'], ...rep_(10, [0.5, 125, 125, 'On'], [0.5, 50, 50, 'Off']), [8, 55, 40, 'Cool-down']] },
 };
+// Ten more of each kind, 45 to 120 minutes: a warm-up, the main set, easy riding or endurance to fill the time, a cool-down.
+{
+  const between = (n, work, rest) => Array.from({ length: n }, (_, i) => i < n - 1 ? [...work, ...rest] : work).flat();   // no rest after the last
+  const sets = (k, set, rest) => between(k, set, [rest]);
+  const make = (type, i, name, about, T, main, fillPct = 65, post = []) => {
+    const w = T <= 50 ? 8 : 10, steps = [[w, 45, 75, 'Warm-up'], ...main];
+    const used = steps.reduce((x, s) => x + s[0], 0) + post.reduce((x, s) => x + s[0], 0) + w;
+    if (T - used > 0.01) steps.push([T - used, fillPct, fillPct, fillPct < 60 ? 'Easy' : 'Endurance']);
+    WORKOUTS[`${type}-${i}`] = { type, name, about, steps: [...steps, ...post, [w, 62, 40, 'Cool-down']] };
+  };
+  const ivl = (n, m, pct, r, label, rp = 55) => between(n, [[m, pct, pct, label]], [[r, rp, rp, 'Easy']]);
+  const R = [[45, 'Recovery 45', 'Forty-five minutes of easy spinning.', []], [50, 'Recovery spin-ups 50', 'Easy riding with six 1-minute spin-ups at 62 %.', rep_(6, [4, 50, 50, 'Easy'], [1, 62, 62, 'Spin-up'])],
+    [55, 'Recovery waves 55', 'Easy riding that rises and falls gently, 5 minutes at a time.', rep_(3, [5, 50, 50, 'Easy'], [5, 58, 58, 'Steady'])], [60, 'Recovery 60', 'An hour of easy spinning.', []],
+    [65, 'Recovery spin-ups 65', 'Easy riding with eight 1-minute spin-ups.', rep_(8, [4, 50, 50, 'Easy'], [1, 62, 62, 'Spin-up'])], [70, 'Recovery waves 70', 'Gentle waves between 50 and 58 %.', rep_(5, [5, 50, 50, 'Easy'], [5, 58, 58, 'Steady'])],
+    [75, 'Recovery 75', 'A long, easy ride.', []], [80, 'Recovery spin-ups 80', 'Easy riding with ten 1-minute spin-ups.', rep_(10, [4, 50, 50, 'Easy'], [1, 62, 62, 'Spin-up'])],
+    [90, 'Recovery waves 90', 'Ninety minutes of gentle waves.', rep_(7, [5, 50, 50, 'Easy'], [5, 58, 58, 'Steady'])], [100, 'Recovery 100', 'The easiest long ride.', []]];
+  R.forEach(([T, n, ab, m], i) => make('recovery', i + 1, n, ab, T, m, 52));
+  const E = [[45, 'Endurance 45', 'Steady zone 2 for 45 minutes.', []], [60, 'Rolling endurance 60', 'Five minutes at 65 %, five at 75 %, over and over.', rep_(4, [5, 65, 65, 'Endurance'], [5, 75, 75, 'Steady'])],
+    [75, 'Endurance 75', 'Steady zone 2 for an hour and a quarter.', []], [90, 'Endurance with bursts 90', 'Steady riding with a 1-minute burst at 95 % every 10 minutes.', rep_(7, [9, 68, 68, 'Endurance'], [1, 95, 95, 'Burst'])],
+    [90, 'Progressive endurance 90', 'An hour that builds from 60 to 78 %.', [[60, 60, 78, 'Build']]], [100, 'Rolling endurance 100', 'Long rolling endurance, 65 and 75 % in turn.', rep_(8, [5, 65, 65, 'Endurance'], [5, 75, 75, 'Steady'])],
+    [105, 'Endurance with sweet spot 105', 'Zone 2 with two 10-minute blocks at 88 %.', between(2, [[10, 88, 88, 'Sweet spot']], [[10, 65, 65, 'Endurance']])],
+    [110, 'Endurance with tempo 110', 'Zone 2 with three 5-minute tempo blocks.', between(3, [[5, 82, 82, 'Tempo']], [[10, 68, 68, 'Endurance']])],
+    [120, 'Long endurance 120', 'Two hours of steady zone 2.', []], [120, 'Endurance, tempo finish 120', 'Long zone 2, then 15 minutes of tempo before the cool-down.', [], [[15, 82, 82, 'Tempo finish']]]];
+  E.forEach(([T, n, ab, m, post], i) => make('endurance', i + 1, n, ab, T, m, 68, post));
+  const set = (type, label, list) => list.forEach(([T, n, m, pct, r, name], i) => make(type, i + 1, name || `${WK_TYPES[type]} ${n} × ${m}`,
+    `${n} × ${m} min at ${pct} %, ${r} min easy between.`, T, ivl(n, m, pct, r, label)));
+  set('tempo', 'Tempo', [[45, 2, 12, 85, 4], [50, 3, 8, 86, 4], [60, 3, 11, 85, 4], [65, 2, 18, 84, 5], [75, 4, 10, 86, 4], [80, 2, 25, 83, 5], [85, 3, 15, 85, 5], [90, 1, 45, 82, 0, 'Tempo 45 minutes'], [100, 3, 20, 84, 5], [120, 2, 30, 85, 10]]);
+  set('sweetspot', 'Sweet spot', [[45, 2, 10, 90, 4], [55, 3, 8, 92, 3], [60, 2, 15, 90, 5], [65, 3, 10, 91, 4], [75, 3, 12, 90, 4], [80, 2, 20, 92, 5, 'Sweet spot 2 × 20 high'], [90, 3, 15, 90, 5], [100, 2, 30, 88, 10], [110, 4, 15, 90, 5], [120, 3, 20, 90, 5]]);
+  set('threshold', 'Threshold', [[45, 3, 6, 102, 3], [50, 2, 10, 100, 5], [60, 3, 8, 100, 4], [65, 5, 5, 102, 3], [70, 3, 10, 100, 5], [75, 2, 15, 98, 6], [80, 3, 12, 99, 6], [90, 2, 20, 98, 8], [100, 4, 10, 100, 5], [120, 3, 15, 100, 7]]);
+  const OU = [[45, 2, 2, 2, 1, 105, 4], [55, 3, 4, 1, 1, 108, 4], [60, 2, 4, 2, 1, 105, 5], [65, 4, 4, 1, 1, 110, 4], [75, 3, 4, 2, 1, 108, 5], [80, 4, 3, 2, 1, 105, 4], [90, 3, 5, 2, 1, 105, 5], [100, 4, 4, 2, 1, 106, 5], [110, 3, 6, 2, 1, 105, 6], [120, 4, 5, 2, 1, 105, 5]];
+  OU.forEach(([T, n, k, u, o, op, r], i) => make('overunder', i + 1, `Over-unders ${n} × ${k * (u + o)}`,
+    `${n} blocks of ${k * (u + o)} minutes: ${u} min at 95 %, ${o} min at ${op} %, ${k} times; ${r} min easy between.`, T,
+    sets(n, rep_(k, [u, 95, 95, 'Under'], [o, op, op, 'Over']), [r, 55, 55, 'Easy'])));
+  const V = [[45, 4, 3, 115, 3], [50, 5, 3, 115, 3], [55, 4, 4, 115, 4], [60, 6, 3, 118, 3], [65, 4, 5, 112, 5], [70, 6, 4, 115, 4], [75, 3, 6, 110, 6], [80, 8, 3, 115, 3, 2], [90, 5, 5, 112, 5], [120, 8, 3, 116, 3]];
+  V.forEach(([T, n, m, pct, r, k = 1], i) => make('vo2', i + 1, k > 1 ? `VO2max ${k} × (${n / k} × ${m})` : `VO2max ${n} × ${m}`,
+    `${n} × ${m} min at ${pct} %, ${r} min to recover each time${k > 1 ? `, in ${k} sets with 8 minutes between` : ''}.`, T,
+    sets(k, ivl(n / k, m, pct, r, 'VO2max', 50), [8, 55, 55, 'Between sets'])));
+  const S = [[45, 2, 8, 30, 30, 125, 5], [50, 3, 8, 30, 30, 125, 4], [55, 2, 10, 40, 20, 120, 5], [60, 3, 10, 30, 30, 125, 5], [65, 3, 13, 30, 15, 130, 5], [70, 4, 8, 30, 30, 125, 4], [75, 3, 12, 40, 20, 120, 5], [80, 2, 15, 30, 30, 125, 6], [90, 4, 10, 30, 30, 125, 5], [110, 3, 10, 40, 20, 122, 6]];
+  S.forEach(([T, n, k, on, off, pct, r], i) => make('vo2short', i + 1, `${on}/${off}s ${n} × ${k}`,
+    `${n} sets of ${k}: ${on} seconds at ${pct} %, ${off} seconds easy; ${r} minutes between sets.`, T,
+    sets(n, rep_(k, [on / 60, pct, pct, 'On'], [off / 60, 50, 50, 'Off']), [r, 50, 50, 'Between sets'])));
+}
 const wkMinutes = w => Math.round(w.steps.reduce((a, s) => a + s[0], 0));
 // Landing page: shown when the address names no course. Choosing one starts the ride right here, without a reload.
 {
@@ -282,12 +349,43 @@ const wkMinutes = w => Math.round(w.steps.reduce((a, s) => a + s[0], 0));
     $('s-maxhr').value = set.maxhr; $('s-maxhr').onchange = e => { const v = Math.round(+e.target.value); if (v >= 120 && v <= 230) set.maxhr = v; else e.target.value = set.maxhr; };
     $('s-erg').checked = set.erg; $('s-erg').onchange = e => set.erg = e.target.checked;
     $('s-ergw').value = set.ergw; $('s-ergw').onchange = e => { const v = Math.round(+e.target.value / 5) * 5; if (v >= 50 && v <= 600) { set.ergw = v; e.target.value = v; } else e.target.value = set.ergw; };
-    $('s-ftp').value = set.ftp; $('s-ftp').onchange = e => { const v = Math.round(+e.target.value / 5) * 5; if (v >= 80 && v <= 500) { set.ftp = v; e.target.value = v; } else e.target.value = set.ftp; wkAbout(); };
-    const sel = $('s-wk'); sel.innerHTML = '<option value="">None: ride freely</option>';
-    for (const [k, w] of Object.entries(WORKOUTS)) { const o = document.createElement('option'); o.value = k; o.textContent = `${w.name} · ${wkMinutes(w)} min`; sel.append(o); }
-    if (!WORKOUTS[set.wk]) set.wk = ''; sel.value = set.wk;
-    const wkAbout = () => { const w = WORKOUTS[set.wk]; $('s-wkab').textContent = w ? w.about + ` Hardest step ${Math.round(Math.max(...w.steps.map(s => Math.max(s[1], s[2] ?? s[1]))) * set.ftp / 100)} W at your FTP.` : 'No set efforts: the power is yours, or ERG holds one value.'; };
-    sel.onchange = () => { set.wk = sel.value; wkAbout(); }; wkAbout();
+    $('s-ftp').value = set.ftp; $('s-ftp').onchange = e => { const v = Math.round(+e.target.value / 5) * 5; if (v >= 80 && v <= 500) { set.ftp = v; e.target.value = v; } else e.target.value = set.ftp; wkAbout(); };   // wkAbout is defined below; this only runs on a change
+    if (!WORKOUTS[set.wk]) set.wk = '';
+    const peak = w => Math.max(...w.steps.map(s => Math.max(s[1], s[2] ?? s[1])));
+    const wkAbout = () => {
+      const w = WORKOUTS[set.wk];
+      $('s-wkbtn').textContent = w ? `${w.name} · ${wkMinutes(w)} min` : 'Choose a workout…';
+      $('s-wkab').textContent = w ? w.about + ` Hardest step ${Math.round(peak(w) * set.ftp / 100)} W at your FTP.` : 'None: ride freely. The power is yours, or ERG holds one value.';
+    };
+    wkAbout();
+    // the picker: the power each workout asks for over time, as a share of FTP (the dashed line is 100 %)
+    const zone = p => p < 60 ? '#9fb7c9' : p < 76 ? '#8fd19e' : p < 91 ? '#f2d36b' : p < 106 ? '#f29b52' : '#ef5b4f';
+    const graph = w => {
+      const tot = w.steps.reduce((a, s) => a + s[0], 0), H = 140; let x = 0, out = '';
+      for (const [m, a, b = a] of w.steps) {
+        out += `<polygon fill="${zone(Math.max(a, b))}" points="${x},${H} ${x},${H - a} ${x + m},${H - b} ${x + m},${H}"/>`; x += m;
+      }
+      return `<svg viewBox="0 0 ${tot} ${H}" preserveAspectRatio="none" aria-hidden="true">${out}<line x1="0" x2="${tot}" y1="${H - 100}" y2="${H - 100}" stroke="rgba(255,255,255,.55)" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/></svg>`;
+    };
+    let only = WORKOUTS[set.wk] ? WORKOUTS[set.wk].type : '';
+    const grid = () => {
+      const g = $('wp-grid'); g.innerHTML = '';
+      const card = (key, inner) => {
+        const b = document.createElement('button'); b.className = 'card' + (key === set.wk ? ' on' : ''); b.innerHTML = inner;
+        b.onclick = () => { set.wk = key; wkAbout(); $('wkpick').hidden = true; }; g.append(b);
+      };
+      if (!only) card('', '<div class="none">Ride freely</div><div class="ct">No workout</div><div class="cm">The power is yours</div>');
+      const list = Object.entries(WORKOUTS).filter(([, w]) => !only || w.type === only).sort((a, b) => wkMinutes(a[1]) - wkMinutes(b[1]));
+      for (const [k, w] of list) {
+        const t = document.createElement('div'); t.textContent = w.name;
+        card(k, `${graph(w)}<div class="ct">${t.innerHTML}</div><div class="cm">${wkMinutes(w)} min · ${WK_TYPES[w.type]} · up to ${peak(w)} % (${Math.round(peak(w) * set.ftp / 500) * 5} W)</div>`);
+        g.lastChild.title = w.about;
+      }
+    };
+    seg('wp-types', [['', 'All'], ...Object.entries(WK_TYPES)], only, v => { only = v; grid(); });
+    $('s-wkbtn').onclick = () => { grid(); $('wkpick').hidden = false; $('wkpick').scrollTop = 0; };
+    $('wp-close').onclick = () => $('wkpick').hidden = true;
+    addEventListener('keydown', e => { if (e.key === 'Escape') $('wkpick').hidden = true; });
     $('s-xmas').checked = set.xmas; $('s-xmas').onchange = e => set.xmas = e.target.checked;
     const list = [['valley', { name: 'Valley', about: 'An invented mountain valley in the evening sun · a loop, gentle climbs' }], ...Object.entries(COURSES)];
     for (const [key, c] of list) {
