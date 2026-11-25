@@ -160,7 +160,8 @@ const camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.05, 9
 scene.add(camera);
 
 /* real courses, built from survey data by the scripts in tools/: ?course=<key> */
-const COURSES = { leckhampton: { name: 'Leckhampton', loading: 'Building Leckhampton Hill…' }, basel: { name: 'Gempen', loading: 'Building the Gempen loop…' } };
+// left: an English road, ridden on the left side
+const COURSES = { leckhampton: { name: 'Leckhampton', loading: 'Building Leckhampton Hill…', left: true }, basel: { name: 'Gempen', loading: 'Building the Gempen loop…' } };
 /* ---------- sky, sun, haze ---------- */
 // ?theme=christmas: the same valley under snow at dusk, with lights in the trees and a few chalets
 const XMAS = new URLSearchParams(location.search).get('theme') === 'christmas' && !COURSES[new URLSearchParams(location.search).get('course')];
@@ -1807,7 +1808,7 @@ function startAudio() {
 addEventListener('pointerdown', startAudio); addEventListener('keydown', startAudio);
 
 /* ---------- ride ---------- */
-const MASS = 80, LANE = -1.75, clock = new THREE.Clock();
+const MASS = 80, LANE = (COURSES[COURSE] && COURSES[COURSE].left ? -1 : 1) * 1.75, clock = new THREE.Clock();   // keep right, except on English roads
 const pose = mkPose(), ahead = mkPose(), probe = mkPose(), look = new V3(), sunNdc = new V3(), fwd = new V3();
 /* ---------- course map: the whole road seen from above, north up, with where the rider is now ---------- */
 const map = (() => {
