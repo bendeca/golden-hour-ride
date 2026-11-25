@@ -220,10 +220,27 @@ let real = null;
 if (COURSE !== 'valley') {
   $('loading').textContent = COURSES[COURSE].loading;
   const addScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('missing ' + src)); document.head.append(s); });
-  const DATA = 3;          // bump when the course files change, so browsers don't reuse an old copy
+  const DATA = 4;          // bump when the course files change, so browsers don't reuse an old copy
   await addScript(`assets/${COURSE}.js?v=${DATA}`);
-  await addScript(`assets/${COURSE}_osm.js?v=${DATA}`).catch(() => {});          // buildings, woods and hedges are optional
   real = window.RIDE_COURSES[COURSE];
+  if (real.world) {        // present day (Swiss courses): aerial photo, 3D buildings and surveyed trees, all from swisstopo
+    await addScript(`assets/${COURSE}_world.js?v=${DATA}`).catch(() => {});
+    if (typeof real.world === 'object') real.photo = await new Promise(res => {
+      const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = `assets/${COURSE}_ortho.jpg?v=${DATA}`;
+    });
+    if (typeof real.world !== 'object' || !real.photo) real.world = null;                   // missing files: ride it without them
+  }
+  if (real.world) {
+    real.osm = { buildings: real.world.far, trees: [], lines: [], woods: real.world.woods, credit: real.world.credit };
+    try {                  // a small copy of the photo to read colours from (not possible from a page opened straight from disk)
+      const [c, g] = canvas2d(1024, 1024); g.drawImage(real.photo, 0, 0, 1024, 1024);
+      const px = g.getImageData(0, 0, 1024, 1024).data;
+      real.colour = (x, z) => {
+        const i = Math.min(1023, Math.max(0, Math.floor((x / real.size + 0.5) * 1024))), j = Math.min(1023, Math.max(0, Math.floor((z / real.size + 0.5) * 1024))), k = (j * 1024 + i) * 4;
+        return [px[k], px[k + 1], px[k + 2]];
+      };
+    } catch { real.colour = null; }
+  } else await addScript(`assets/${COURSE}_osm.js?v=${DATA}`).catch(() => {});          // buildings, woods and hedges are optional
   real.osm = real.osm || { buildings: [], trees: [], lines: [], woods: '', credit: '' };
   const wb = Uint8Array.from(atob(real.osm.woods), c => c.charCodeAt(0));
   real.wood = (x, z) => {                 // is this spot mapped as woodland?
@@ -240,6 +257,7 @@ $('course').addEventListener('click', () => {          // valley, then each real
   const order = ['valley', ...Object.keys(COURSES)], next = order[(order.indexOf(COURSE) + 1) % order.length];
   location.search = next === 'valley' ? '' : '?course=' + next;
 });
+const WORLD = !!(real && real.world);          // a present-day course: the photo on the ground, real buildings and trees
 function demH(x, z) {                 // the real ground under a point
   const g = real.cells, w = g + 1, f = v => Math.min(g - 1e-6, Math.max(0, (v + real.size / 2) / (real.size / g)));
   const fx = f(x), fz = f(z), ix = Math.floor(fx), iz = Math.floor(fz), u = fx - ix, v = fz - iz, h = real.h;
@@ -343,8 +361,9 @@ tGeo.computeVertexNormals();
   const gA = new THREE.Color(0.8, 0.95, 0.7), gB = new THREE.Color(1.3, 1.15, 0.75), white = new THREE.Color(1, 1, 1), tMix = new Float32Array(TW * TW * 2);
   for (let k = 0; k < TW * TW; k++) {
     const x = tPos[k * 3], h = tPos[k * 3 + 1], z = tPos[k * 3 + 2], ny = nrm[k * 3 + 1];
-    const rk = smooth(0.86, 0.66, ny), sn = XMAS ? smooth(0.42, 0.72, ny) * 1.25 : smooth(330, 430, h) * smooth(0.5, 0.75, ny);
+    const rk = WORLD ? 0 : smooth(0.86, 0.66, ny), sn = WORLD ? 0 : XMAS ? smooth(0.42, 0.72, ny) * 1.25 : smooth(330, 430, h) * smooth(0.5, 0.75, ny);
     col.copy(gA).lerp(gB, smooth(0.3, 0.7, fbm(x / 45, z / 45, 3))).lerp(white, rk);   // tint the grass, leave rock alone
+    if (WORLD) col.copy(white);                       // the photo has the colours already
     if (XMAS) { const d = 0.9 + 0.2 * fbm(x / 30, z / 30, 3); col.setRGB(d, d, d * 1.04); }          // drifts: faint light and shade across the snow
     tCol.set([col.r, col.g, col.b], k * 3); tMix.set([rk, sn], k * 2);
   }
@@ -382,10 +401,16 @@ function speckleTex(size, base, spread, count) {
 }
 const rockMap = imgTex(imgRock, true);
 const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: imgTex(imgGrass, true), normalMap: imgTex(imgGrassN), roughness: 1 });
+let orthoTex = null;
+if (WORLD) {             // the aerial photo, draped over the whole square (north at the top, so no flip)
+  let src = real.photo;
+  if (renderer.capabilities.maxTextureSize < src.width) { const [c, g] = canvas2d(2048, 2048); g.drawImage(src, 0, 0, 2048, 2048); src = c; }
+  orthoTex = new THREE.Texture(src); orthoTex.flipY = false; orthoTex.colorSpace = THREE.SRGBColorSpace; orthoTex.anisotropy = MAX_ANISO; orthoTex.needsUpdate = true;
+}
 terrainMat.onBeforeCompile = s => {      // grass on the flats, rock on the steeps, snow up high; a second, larger sample hides the tiling
-  s.uniforms.uRock = { value: rockMap }; s.uniforms.uSunAmt = uSunAmt;
-  s.vertexShader = 'attribute vec2 aMix; attribute float aShade; varying vec2 vMix; varying float vShade;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vMix = aMix; vShade = aShade;');
-  s.fragmentShader = 'uniform sampler2D uRock; uniform float uSunAmt; varying vec2 vMix; varying float vShade;\n' + s.fragmentShader.replace('#include <map_fragment>', `
+  s.uniforms.uRock = { value: rockMap }; s.uniforms.uSunAmt = uSunAmt; s.uniforms.uOrtho = { value: orthoTex };
+  s.vertexShader = 'attribute vec2 aMix; attribute float aShade; varying vec2 vMix; varying float vShade; varying vec2 vOuv;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n vMix = aMix; vShade = aShade; vOuv = (position.xz + ${(TS / 2).toFixed(1)}) / ${TS.toFixed(1)};`);
+  s.fragmentShader = 'uniform sampler2D uRock, uOrtho; uniform float uSunAmt; varying vec2 vMix; varying float vShade; varying vec2 vOuv;\n' + s.fragmentShader.replace('#include <map_fragment>', `
     vec3 gc = mix(texture2D(map, vMapUv).rgb, texture2D(map, vMapUv * 0.137).rgb, 0.15);
     gc = mix(gc, vec3(gc.g * 0.6, gc.g * 1.05, gc.g * 0.35), 0.4);                       // lean the bare ground toward the grass colour, so the meadow's edge doesn't show
     vec3 r1 = texture2D(uRock, vMapUv * 0.3).rgb, r2 = texture2D(uRock, vMapUv * 0.041).rgb, r3 = texture2D(uRock, vMapUv * 0.009).rgb;
@@ -393,7 +418,12 @@ terrainMat.onBeforeCompile = s => {      // grass on the flats, rock on the stee
     vec3 rc = mix(r1, r2, 0.4) * (0.35 + l2 * 1.2 + l3 * 1.6);                          // light and dark bands across whole rock faces
     float rockAmt = smoothstep(0.3, 0.7, vMix.x + (l2 - 0.3) * 0.9);                     // ragged edges where grass gives way to rock
     float snowAmt = smoothstep(0.35, 0.65, vMix.y + (l3 - 0.3) * 0.8);
-    diffuseColor.rgb *= mix(mix(gc, rc, rockAmt), ${XMAS ? 'vec3(0.66, 0.70, 0.78)' : 'vec3(0.92)'}, snowAmt) * mix(1., vShade, uSunAmt);`);
+    ${WORLD ? `
+    vec3 oc = texture2D(uOrtho, vOuv).rgb * 1.3;                                         // the photo is the ground's colour
+    float near = 1. - smoothstep(25., 140., length(vViewPosition));
+    float dl = clamp(dot(texture2D(map, vMapUv).rgb, vec3(0.333)) * 3.2, 0.55, 1.45);       // up close, the grass texture's light and shade on top
+    diffuseColor.rgb *= oc * mix(1., dl, near * 0.7) * mix(1., vShade, uSunAmt);` : `
+    diffuseColor.rgb *= mix(mix(gc, rc, rockAmt), ${XMAS ? 'vec3(0.66, 0.70, 0.78)' : 'vec3(0.92)'}, snowAmt) * mix(1., vShade, uSunAmt);`}`);
 };
 const terrain = new THREE.Mesh(tGeo, terrainMat);
 terrain.receiveShadow = true; terrain.castShadow = true;
@@ -570,7 +600,7 @@ const chunks = [];
 
 /* ---------- 19th-century touches (real courses): sheep on the hill, hay stooks in the vale ---------- */
 const stamps = [];       // patches where the meadow is grazed short or cut to stubble
-if (real) {
+if (real && !WORLD) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new V3(0, 1, 0), sc = new V3(), ps = new V3(), col = new THREE.Color();
   const open = (x, z) => Math.abs(x) < TS / 2 - 60 && Math.abs(z) < TS / 2 - 60 && !real.wood(x, z);
   const slopeAt = (x, z) => Math.hypot(demH(x + 10, z) - demH(x - 10, z), demH(x, z + 10) - demH(x, z - 10)) / 20;
@@ -641,6 +671,11 @@ if (real) {
   for (let k = 0; k < TW * TW; k++) {             // per terrain vertex: height, distance to road, rock/snow, dryness
     const nr = nearRoad(tPos[k * 3], tPos[k * 3 + 2]);
     data.set([H[k], nr ? Math.min(nr.d, 100) : 100, Math.max(mix[k * 2], mix[k * 2 + 1]), smooth(0.3, 0.7, fbm(tPos[k * 3] / 45, tPos[k * 3 + 2] / 45, 3))], k * 4);
+    if (WORLD) {           // grass only where the photo shows green ground: not on roads, roofs, fields of bare earth or under the woods
+      const x = tPos[k * 3], z = tPos[k * 3 + 2], c = real.colour ? real.colour(x, z) : null;
+      const green = c ? c[1] > c[0] * 1.04 && c[1] > c[2] * 1.12 && c[1] > 55 : true;
+      if (!green || real.wood(x, z)) data[k * 4 + 2] = 1;
+    }
   }
   for (const s of stamps) {            // grazed pasture and stubble: shorter grass, or none
     const i0 = Math.round((s.x + TS / 2) / TC), j0 = Math.round((s.z + TS / 2) / TC), n = Math.ceil(s.r / TC);
@@ -878,23 +913,35 @@ if (XMAS) {
     for (const [bx, bz, w] of real.osm.buildings) for (let dx = -w / 2 - 4; dx <= w / 2 + 4; dx += 10) for (let dz = -w / 2 - 4; dz <= w / 2 + 4; dz += 10) built.add(cellKey(bx + dx, bz + dz));
     for (const [x, z] of real.osm.trees) { const nr = nearRoad(x, z); if (!nr || nr.d > 5.5) spots.push([x, meshH(x, z), z]); }     // mapped street and field trees
   }
-  for (let n = 0; n < (real ? 320000 : 70000) && spots.length < (real ? 26000 : 7000); n++) {
+  const conifers = [];
+  if (WORLD) {             // surveyed trees, where they stand and as tall as they are; the darkest crowns are spruce and fir
+    const raw = Uint8Array.from(atob(real.world.trees), c => c.charCodeAt(0)), dv = new DataView(raw.buffer);
+    for (let o = 0; o + 6 <= raw.length; o += 6) {
+      const x = dv.getInt16(o, true) / 2, z = dv.getInt16(o + 2, true) / 2, h = dv.getUint8(o + 4) / 4, k = dv.getUint8(o + 5), nr = nearRoad(x, z);
+      if (nr && nr.d < 5) continue;
+      (k ? conifers : spots).push([x, meshH(x, z), z, Math.max(0.3, h / (k ? 1 : 10.8))]);
+    }
+    st0.surveyedTrees = spots.length + conifers.length;
+  }
+  const cap = WORLD ? spots.length + conifers.length + 14000 : real ? 26000 : 7000;     // the present day: fill the distant woods too
+  for (let n = 0; n < (real ? 320000 : 70000) && spots.length + conifers.length < cap; n++) {
     const x = (rnd() - 0.5) * TS * 0.78, z = (rnd() - 0.5) * TS * 0.78, nr = nearRoad(x, z), d = nr ? nr.d : 999;
     if (d < 11) continue;
     if (chalets.some(c => (c[0] - x) ** 2 + (c[1] - z) ** 2 < 170)) continue;
     const forest = fbm(x / 140 + 3, z / 140 + 7, 3);
     if (real) {            // trees where the map says there is woodland, and never on a building
       if (!real.wood(x, z) || built.has(cellKey(x, z))) continue;
+      if (WORLD && d < 900) continue;                // near the road the survey has placed every tree already
     } else if (!(forest > 0.53 || (d < 55 && rnd() < (XMAS ? 0.42 : 0.1)))) continue;
     const y = meshH(x, z);
     if (!real && y > 240) continue;
-    spots.push([x, y, z]);
+    (WORLD && rnd() < 0.4 ? conifers : spots).push(WORLD ? [x, y, z, 1.4 + rnd() * 0.9] : [x, y, z]);
   }
   const fol = new THREE.InstancedMesh(folGeo, folMat, spots.length);
   const trunk = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x33251a, roughness: 1 }), spots.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new V3(0, 1, 0), sc = new V3(), ps = new V3(), col = new THREE.Color();
-  spots.forEach(([x, y, z], i) => {
-    const s = 0.9 + rnd() * 0.9;
+  spots.forEach(([x, y, z, s0], i) => {
+    const s = s0 || 0.9 + rnd() * 0.9;
     ps.set(x, y - 0.3, z); q.setFromAxisAngle(up, rnd() * 6.283); sc.set(s * (0.85 + rnd() * 0.3), s, s * (0.85 + rnd() * 0.3));
     m4.compose(ps, q, sc); fol.setMatrixAt(i, m4); trunk.setMatrixAt(i, m4);
     if (XMAS && xl.p.length < 110000 * 3) {            // fairy lights wound round the trees beside the road
@@ -911,6 +958,40 @@ if (XMAS) {
     fol.setColorAt(i, col.setRGB(0.7 + rnd() * 0.3, 0.75 + rnd() * 0.25, 0.6 + rnd() * 0.3));
   });
   for (const m of [fol, trunk]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; scene.add(m); }
+
+  if (conifers.length) {   // spruce and fir: three crossed cards with a tiered, pointed crown, one unit tall
+    const [cc, cg] = canvas2d(128, 256);
+    for (let t = 0; t < 26; t++) {                    // tiers of boughs, wide at the foot, narrowing to the tip
+      const y = 250 - t * 9.2, w = Math.pow((t + 1) / 27, -0.05) * (1 - t / 27) * 60 + 4;
+      for (let k = 0; k < 9; k++) {
+        const l = 16 + rnd() * 26 | 0; cg.fillStyle = `rgb(${l * 0.7 | 0},${l + 16},${l * 0.62 | 0})`;
+        const sx = 64 + (rnd() - 0.5) * w * 1.7, ww = w * (0.35 + rnd() * 0.4);
+        cg.beginPath(); cg.moveTo(sx - ww, y + 4); cg.lineTo(sx + ww, y + 4); cg.lineTo(sx + (rnd() - 0.5) * 6, y - 14 - rnd() * 6); cg.fill();
+      }
+    }
+    cg.fillStyle = '#2a1e14'; cg.fillRect(62, 236, 4, 20);
+    const cmap = new THREE.CanvasTexture(cc); cmap.colorSpace = THREE.SRGBColorSpace; cmap.anisotropy = 4;
+    const cp = [], cu = [], cn = [], ci = [];
+    for (const a of [0, 1.047, 2.094]) {
+      const dx = Math.cos(a) * 0.23, dz = Math.sin(a) * 0.23, b = cp.length / 3;
+      cp.push(-dx, 0, -dz, dx, 0, dz, dx, 1, dz, -dx, 1, -dz); cu.push(0, 0, 1, 0, 1, 1, 0, 1);
+      for (let k = 0; k < 4; k++) cn.push(-dz * 3, 0.6, dx * 3);
+      ci.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    }
+    const cgeo = new THREE.BufferGeometry();
+    cgeo.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3)); cgeo.setAttribute('uv', new THREE.Float32BufferAttribute(cu, 2));
+    cgeo.setAttribute('normal', new THREE.Float32BufferAttribute(cn, 3)); cgeo.setIndex(ci);
+    const cmat = new THREE.MeshStandardMaterial({ map: cmap, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 });
+    cmat.onBeforeCompile = folMat.onBeforeCompile;
+    const con = new THREE.InstancedMesh(cgeo, cmat, conifers.length);
+    conifers.forEach(([x, y, z, h], i) => {
+      q.setFromAxisAngle(up, rnd() * 6.283); const w = h * (0.85 + rnd() * 0.3);
+      con.setMatrixAt(i, m4.compose(ps.set(x, y - 0.2, z), q, sc.set(w, h, w)));
+      con.setColorAt(i, col.setRGB(0.75 + rnd() * 0.25, 0.8 + rnd() * 0.2, 0.75 + rnd() * 0.25));
+    });
+    con.castShadow = con.receiveShadow = true; con.frustumCulled = false; scene.add(con);
+  }
+  st0.trees = spots.length; st0.conifers = conifers.length;
 }
 
 if (xl.p.length) {         // every Christmas light is one glowing point; bright enough to bloom
@@ -962,26 +1043,55 @@ if (real && real.osm.buildings.length) {
   const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
   const walls = new THREE.InstancedMesh(box, wallMat, B.length), pitched = new THREE.InstancedMesh(hip, roofMat, B.length), flat = new THREE.InstancedMesh(box, roofMat, B.length);
   let np = 0, nf = 0, nw = 0;
-  const SHOW_TOWN = false;     // 19th-century dressing on every real course: villages among fields, so the modern town is left out
+  const SHOW_TOWN = WORLD;     // 19th-century dressing (Leckhampton): villages among fields, so the modern town is left out
   const KEEP_OUT = 150;        // simple house shapes only hold up at a distance, so none are drawn near the road
   const farFromRoad = (x, z) => { for (let k = 0; k < N; k += 8) { const ex = P[k].x - x, ez = P[k].z - z; if (ex * ex + ez * ez < KEEP_OUT * KEEP_OUT) return false; } return true; };
-  B.forEach(([x, z, w, d, ang, h, roof]) => {
-    if (!SHOW_TOWN || !farFromRoad(x, z)) return;
+  B.forEach(([x, z, w, d, ang, h, roof, ridge, cr, cg, cb]) => {
+    if (!SHOW_TOWN || (!WORLD && !farFromRoad(x, z))) return;         // present day: the near ones are the real models below
     const i = nw++;
     const c = Math.cos(ang), sn = Math.sin(ang);
     let lo = 1e9, hi = -1e9;
     for (const [u, v] of [[0, 0], [w / 2, d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [-w / 2, -d / 2]]) { const y = meshH(x + u * c - v * sn, z + u * sn + v * c); lo = Math.min(lo, y); hi = Math.max(hi, y); }
     q.setFromAxisAngle(up, -ang);
     walls.setMatrixAt(i, m4.compose(ps.set(x, lo - 0.4, z), q, sc.set(w, h + hi - lo + 0.4, d)));
-    walls.setColorAt(i, col.setHSL(0.1, 0.2, 0.56 + rnd() * 0.08));                // one muted stone, so the town reads as a single mass
-    const slate = col.setHSL(0.6, 0.06, 0.2 + rnd() * 0.06);
-    if (roof) { pitched.setMatrixAt(np, m4.compose(ps.set(x, hi + h, z), q, sc.set(w + 0.8, Math.min(3.4, d * 0.34), d + 0.8))); pitched.setColorAt(np++, slate); }
+    walls.setColorAt(i, WORLD ? col.setHSL(0.11, 0.18, 0.78 + rnd() * 0.1) : col.setHSL(0.1, 0.2, 0.56 + rnd() * 0.08));   // present-day plaster; or one muted stone, so the old town reads as a single mass
+    const slate = WORLD && cr !== undefined ? col.setRGB(cr / 255, cg / 255, cb / 255, THREE.SRGBColorSpace) : col.setHSL(0.6, 0.06, 0.2 + rnd() * 0.06);   // roof colour from the photo
+    if (roof) { pitched.setMatrixAt(np, m4.compose(ps.set(x, hi + h, z), q, sc.set(w + 0.8, WORLD ? Math.max(0.8, Math.min(ridge, d * 0.6)) : Math.min(3.4, d * 0.34), d + 0.8))); pitched.setColorAt(np++, slate); }
     else { flat.setMatrixAt(nf, m4.compose(ps.set(x, hi + h, z), q, sc.set(w + 0.3, 0.3, d + 0.3))); flat.setColorAt(nf++, slate); }
   });
   walls.count = nw; pitched.count = np; flat.count = nf;
   for (const m of [walls, pitched, flat]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; scene.add(m); }
-
+  st0.blocks = nw;
+}
+if (WORLD && real.world.near.n) {      // buildings near the road: swisstopo's models, real walls and roofs, one mesh
+  const b64 = (s, T) => { const r = Uint8Array.from(atob(s), c => c.charCodeAt(0)); return new T(r.buffer, 0, r.byteLength / T.BYTES_PER_ELEMENT); };
+  const nb = real.world.near, A = b64(nb.a, Float32Array), Ns = b64(nb.n, Uint16Array), V = b64(nb.v, Int16Array), Cc = b64(nb.c, Uint8Array);
+  const pos = new Float32Array(V.length), colr = new Float32Array(V.length), c = new THREE.Color();
+  let t = 0;
+  for (let b = 0; b < Ns.length; b++) {
+    const bx = A[b * 3], bz = A[b * 3 + 2];
+    const by = Math.min(A[b * 3 + 1], meshH(bx, bz)) - 0.2;          // on the ground as drawn: never floating above it
+    for (let e = t + Ns[b]; t < e; t++) {
+      c.setRGB(Cc[t * 3] / 255, Cc[t * 3 + 1] / 255, Cc[t * 3 + 2] / 255, THREE.SRGBColorSpace);
+      for (let k = 0; k < 3; k++) {
+        const o = t * 9 + k * 3;
+        pos[o] = bx + V[o] / 10; pos[o + 1] = by + V[o + 1] / 10; pos[o + 2] = bz + V[o + 2] / 10;
+        colr[o] = c.r; colr[o + 1] = c.g; colr[o + 2] = c.b;
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(colr, 3));
+  g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide }));
+  mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+  st0.nearBuildings = Ns.length; st0.nearTriangles = t;
+}
+if (real && real.osm.lines.length) {
   // hedges and dry-stone walls, laid in short pieces that follow the ground
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new V3(0, 1, 0), sc = new V3(), ps = new V3();
+  const speck = (g, w, h, base, spread, n) => { for (let i = 0; i < n; i++) { const l = base + (rnd() - 0.5) * spread | 0; g.fillStyle = `rgba(${l},${l - 4},${l - 14},0.5)`; g.fillRect(rnd() * w, rnd() * h, 2 + rnd() * 5, 1 + rnd() * 2); } };
+  const box = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const [hc, hg] = canvas2d(64, 64); hg.fillStyle = '#263a17'; hg.fillRect(0, 0, 64, 64);
   for (let i = 0; i < 500; i++) { const l = 30 + rnd() * 50 | 0; hg.fillStyle = `rgb(${l * 0.7 | 0},${l + 20},${l * 0.4 | 0})`; hg.fillRect(rnd() * 64, rnd() * 64, 2 + rnd() * 3, 2 + rnd() * 3); }
   const [sc2, sg] = canvas2d(64, 64); sg.fillStyle = '#9c927c'; sg.fillRect(0, 0, 64, 64); speck(sg, 64, 64, 150, 90, 500);
