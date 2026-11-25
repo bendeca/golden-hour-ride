@@ -1839,6 +1839,7 @@ const REC = { state: 'ready', t0: 0, moving: 0, pts: [], saved: false };
   };
   const fmt = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
   const setState = n => {
+    if (n === 'riding' && REC.state !== 'riding') ERG.rampAt = performance.now();     // from a standstill: ease ERG back in
     REC.state = n;
     $('go').hidden = n !== 'ready'; $('rec').hidden = n === 'ready' || n === 'done'; $('fin').hidden = n === 'ready' || n === 'done';
     $('rec').textContent = n === 'paused' ? 'Resume' : 'Pause'; $('rec').classList.toggle('on', n === 'paused');
@@ -1994,12 +1995,22 @@ async function sendGrade() {
   bike.busy = false;
 }
 
-// ERG: the target power, whenever it changes and again every 5 s in case one was missed
+// Pushing 300 W against a trainer from a standstill is hard: before the start and while paused it asks for only 30 %
+// of the target, and after Start or Resume it builds back up to the full target over 15 s.
+const ERG_RAMP = 15000;
+const ergNow = () => {
+  const paused = typeof REC !== 'undefined' && REC.state !== 'riding';
+  const k = paused ? 0 : Math.min(1, (performance.now() - (ERG.rampAt ?? -1e9)) / ERG_RAMP);
+  return Math.max(50, Math.round(ERG.w * (0.3 + 0.7 * k * k * (3 - 2 * k)) / 5) * 5);
+};
+setInterval(() => { if (ERG.on) { const w = ergNow(); $('eval').textContent = (w < ERG.w ? w + ' → ' : '') + ERG.w + ' W'; } }, 250);   // show the ramp
+// ERG: the target power, whenever it changes (at most once a second while it ramps) and again every 5 s in case one was missed
 async function sendPower() {
-  const now = performance.now();
-  if (!bike.point || bike.busy || (bike.ergSent === ERG.w && now - bike.at < 5000)) return;
+  const now = performance.now(), w = ergNow();
+  if (!bike.point || bike.busy) return;
+  if (bike.ergSent === w ? now - bike.at < 5000 : bike.at && now - bike.at < 1000 && Math.abs(w - ERG.w) > 2) return;
   bike.busy = true; bike.at = now;
-  const point = bike.point, w = ERG.w, d = new DataView(new ArrayBuffer(3));
+  const point = bike.point, d = new DataView(new ArrayBuffer(3));
   d.setUint8(0, OP_POWER); d.setInt16(1, w, true);
   try { await point.writeValueWithResponse(d); bike.ergSent = w; bike.fails = 0; }
   catch (err) { if (bike.point === point && ++bike.fails >= 3) { bike.point = null; clearInterval(bike.timer); btLabel(); } }
