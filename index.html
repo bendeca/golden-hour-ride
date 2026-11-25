@@ -1065,20 +1065,22 @@ if (real && real.osm.buildings.length) {
 }
 if (WORLD && real.world.near.n) {      // buildings near the road: swisstopo's models, real walls and roofs, one mesh
   const b64 = (s, T) => { const r = Uint8Array.from(atob(s), c => c.charCodeAt(0)); return new T(r.buffer, 0, r.byteLength / T.BYTES_PER_ELEMENT); };
-  const nb = real.world.near, A = b64(nb.a, Float32Array), Ns = b64(nb.n, Uint16Array), V = b64(nb.v, Int16Array), Cc = b64(nb.c, Uint8Array);
-  const pos = new Float32Array(V.length), colr = new Float32Array(V.length), c = new THREE.Color();
-  let t = 0;
+  const nb = real.world.near, A = b64(nb.a, Float32Array), Ns = b64(nb.n, Uint16Array), Ms = b64(nb.m, Uint16Array);
+  const V = b64(nb.v, Int16Array), I = b64(nb.i, Uint16Array), Cc = b64(nb.c, Uint8Array);
+  const pos = new Float32Array(I.length * 3), colr = new Float32Array(I.length * 3), c = new THREE.Color();
+  let t = 0, v0 = 0;       // each building: its corners (shared), then its triangles as three corner numbers each
   for (let b = 0; b < Ns.length; b++) {
     const bx = A[b * 3], bz = A[b * 3 + 2];
     const by = Math.min(A[b * 3 + 1], meshH(bx, bz)) - 0.2;          // on the ground as drawn: never floating above it
     for (let e = t + Ns[b]; t < e; t++) {
       c.setRGB(Cc[t * 3] / 255, Cc[t * 3 + 1] / 255, Cc[t * 3 + 2] / 255, THREE.SRGBColorSpace);
       for (let k = 0; k < 3; k++) {
-        const o = t * 9 + k * 3;
-        pos[o] = bx + V[o] / 10; pos[o + 1] = by + V[o + 1] / 10; pos[o + 2] = bz + V[o + 2] / 10;
+        const o = (t * 3 + k) * 3, vi = (v0 + I[t * 3 + k]) * 3;
+        pos[o] = bx + V[vi] / 10; pos[o + 1] = by + V[vi + 1] / 10; pos[o + 2] = bz + V[vi + 2] / 10;
         colr[o] = c.r; colr[o + 1] = c.g; colr[o + 2] = c.b;
       }
     }
+    v0 += Ms[b];
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(colr, 3));

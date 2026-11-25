@@ -23,7 +23,7 @@ cE, cN = course['origin']; SIZE, CELLS = course['size'], course['cells']; HALF =
 E0, N0, E1, N1 = cE - HALF, cN - HALF, cE + HALF, cN + HALF
 PX = 2.0; W = int(round(SIZE / PX))                  # the 2 m working grid over the whole square; row 0 is the north edge
 ORTHO = 4096                                         # the picture the page gets: 4096 px across, about 2.5 m a pixel
-NEAR = 180                                           # buildings this close to the road get their real shape
+NEAR = 150                                           # buildings this close to the road get their real shape
 TREE_ALL, TREE_FAR, TREE_CAP = 250, 900, 60000       # every tree within 250 m of the road, fewer out to 900 m, at most 60k
 
 def local(E, N): return E - cE, -(N - cN)            # x east, z south, as the page uses
@@ -122,7 +122,7 @@ def triangulate(poly):
     return out
 
 PLASTER = [(236, 229, 214), (228, 222, 207), (241, 237, 229), (219, 211, 196), (233, 223, 201), (224, 214, 199), (238, 232, 220)]
-near_a, near_n, near_v, near_c, far, foot = [], [], [], [], [], []
+near_a, near_n, near_m, near_v, near_i, near_c, far, foot = [], [], [], [], [], [], [], []
 count = {'all': 0, 'near': 0, 'far': 0, 'outside': 0, 'tris': 0}
 def building(el):
     surf = {'Roof': [], 'Wall': [], 'Ground': []}
@@ -151,28 +151,31 @@ def building(el):
     rc = colour_at(cx, cz, 2)
     if d < NEAR:
         count['near'] += 1
-        base = len(near_v) // 9; wall = np.array(PLASTER[count['near'] % len(PLASTER)]) * (0.93 + 0.07 * ((count['near'] * 7919) % 13) / 12)
+        verts, ntri = {}, 0                          # corners shared between a building's triangles
+        wall = np.array(PLASTER[count['near'] % len(PLASTER)]) * (0.93 + 0.07 * ((count['near'] * 7919) % 13) / 12)
         for kind in ('Roof', 'Wall'):
             for poly in surf[kind]:
                 for a, b, c in triangulate(poly):
                     for p in (poly[a], poly[b], poly[c]):
-                        near_v.extend([round((p[0] - cx) * 10), round((p[1] - ground) * 10), round((p[2] - cz) * 10)])
+                        key = (round((p[0] - cx) * 10), round((p[1] - ground) * 10), round((p[2] - cz) * 10))
+                        if key not in verts: verts[key] = len(verts); near_v.extend(key)
+                        near_i.append(verts[key])
+                    ntri += 1
                     if kind == 'Roof':
                         m = [(poly[a][k] + poly[b][k] + poly[c][k]) / 3 for k in (0, 2)]
                         col = colour_at(m[0], m[1], 1) * 0.6 + rc * 0.4     # the photo under that part of the roof
                     else: col = wall
                     near_c.extend(int(min(255, max(0, v))) for v in col)
-        n = len(near_v) // 9 - base
-        if n: near_a.extend([cx, ground, cz]); near_n.append(n); count['tris'] += n
+        if ntri: near_a.extend([cx, ground, cz]); near_n.append(ntri); near_m.append(len(verts)); count['tris'] += ntri
     else:
         b = best_box(fp)
         if not b: return
         _, bx, bz, w, dd, ang = b
         if w < dd: w, dd, ang = dd, w, ang + math.pi / 2
-        if w < 2 or dd < 2: return
+        if w < 2 or dd < 2 or w * dd < 25 or d > 1200: return      # sheds, and anything over 1.2 km off: the photo shows them
         h = max(2.4, rlo - ground); ridge = rhi - rlo
         count['far'] += 1
-        far.append([round(bx, 1), round(bz, 1), round(w, 1), round(dd, 1), round(ang, 3), round(h, 1), 1 if ridge > 1.2 else 0, round(min(ridge, 12), 1), *[int(v) for v in rc]])
+        far.append([round(bx), round(bz), round(w, 1), round(dd, 1), round(ang, 2), round(h, 1), 1 if ridge > 1.2 else 0, round(min(ridge, 12), 1), *[int(v) for v in rc]])
 
 for sh, (year, href) in sorted(sheets.items()):
     path = S.fetch(href, os.path.join(CACHE, os.path.basename(href)))
@@ -255,8 +258,8 @@ print('forest: %.1f km2 of %.1f' % (sum(mask) * CELL ** 2 / 1e6, SIZE ** 2 / 1e6
 
 b64 = lambda a: base64.b64encode(a).decode()
 out = {
-    'near': {'a': b64(np.array(near_a, np.float32).tobytes()), 'n': b64(np.array(near_n, np.uint16).tobytes()),
-             'v': b64(np.array(near_v, np.int16).tobytes()), 'c': b64(bytes(near_c)), 'radius': NEAR},
+    'near': {'a': b64(np.array(near_a, np.float32).tobytes()), 'n': b64(np.array(near_n, np.uint16).tobytes()), 'm': b64(np.array(near_m, np.uint16).tobytes()),
+             'v': b64(np.array(near_v, np.int16).tobytes()), 'i': b64(np.array(near_i, np.uint16).tobytes()), 'c': b64(bytes(near_c)), 'radius': NEAR},
     'far': far, 'trees': b64(trees), 'woods': b64(bytes(bits)),
     'credit': 'Aerial photo, buildings and trees: SWISSIMAGE, swissBUILDINGS3D, swissSURFACE3D © swisstopo.',
 }
