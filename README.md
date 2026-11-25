@@ -2,8 +2,6 @@
 
 A proof-of-concept indoor cycling ride that runs in the browser (Three.js, one `index.html`).
 
-Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-hour-ride.space.fast/?course=leckhampton · Gempen loop: https://golden-hour-ride.space.fast/?course=basel
-
 ## What's in it
 
 - A landing page at the plain address: the settings (weather, how much of each hill the trainer gives you, maximum heart rate, Christmas, scenery mode), kept in the browser, and the list of courses. Choosing a course starts the ride; the Course button goes back to the list. Links with `?course=` skip the landing page.
@@ -32,7 +30,6 @@ Then open http://localhost:8791/.
 - `index.html` – the whole ride.
 - `assets/` – textures and course data. `textures.js` is an embedded copy of the textures, used only when the page is opened straight from disk.
 - `tools/` – scripts that build the course data. `build_leckhampton.py` and `build_leckhampton_osm.py` build Leckhampton. `build_course.py <course>` builds a Swiss course's road and terrain, then `build_course_world.py <course>` its present-day world (`assets/<course>_ortho.jpg` and `assets/<course>_world.js`); they share `swisstopo.py`, need `pip3 install tifffile imagecodecs numpy pillow`, and keep their downloads in `tools/.cache/` (the world build reads about 2.5 GB the first time, but keeps only what it uses). `build_course_osm.py` is the OpenStreetMap version, for a Swiss course without the world files.
-- `deploy.sh` – publishes to Spacefast.
 
 ## Credits
 
