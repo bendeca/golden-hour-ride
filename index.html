@@ -32,6 +32,21 @@
   #erg:not(.on) .adj, #erg:not(.on) #eval { display: none; }
   #eval { min-width: 52px; text-align: center; }
   #hills.dim { opacity: .4; }
+  /* recording: start, pause, finish and save */
+  #go { position: fixed; left: 50%; bottom: 22vh; transform: translateX(-50%); z-index: 5; text-align: center; }
+  #go[hidden], #done[hidden] { display: none; }
+  #go button { font: inherit; font-size: 18px; letter-spacing: .06em; color: #1d1612; background: #ffcf8f; border: 0; border-radius: 999px; padding: 16px 40px; cursor: pointer; box-shadow: 0 6px 30px rgba(0,0,0,.45); }
+  #go div { margin-top: 10px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; opacity: .8; text-shadow: 0 1px 8px rgba(0,0,0,.7); }
+  #done { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; width: min(380px, calc(100vw - 32px)); padding: 20px 22px; border-radius: 16px;
+    background: rgba(20,16,12,.86); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(10px); }
+  #done h3 { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #ffcf8f; }
+  #done .sum { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px 10px; margin-bottom: 14px; }
+  #done .sum b { display: block; font-size: 22px; font-weight: 300; font-variant-numeric: tabular-nums; }
+  #done .sum span { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .7; }
+  #done .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+  #done button { font: inherit; font-size: 12px; color: #fff; background: rgba(20,16,12,.5); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+  #done button.main { color: #1d1612; background: #fc5200; border-color: #fc5200; color: #fff; }
+  #done .note { margin-top: 12px; font-size: 11px; line-height: 1.45; opacity: .75; }
   #wk { position: fixed; left: 18px; top: 64px; width: 250px; padding: 12px 14px; border-radius: 14px; background: rgba(20,16,12,.6);
     border: 1px solid rgba(255,255,255,.28); backdrop-filter: blur(8px); font-size: 12px; text-shadow: none; }
   #wk[hidden] { display: none; }
@@ -155,8 +170,10 @@
   <div><b id="h-sp">0.0</b><span>km/h</span></div>
   <div><b id="h-gr">0.0</b><span>gradient %</span></div>
   <div><b id="h-di">0.00</b><span>km</span></div>
+  <div><b id="h-tm">0:00</b><span>time</span></div>
 </div>
 <div id="ctl">
+  <button id="rec" hidden title="Pause or carry on (Space)">Pause</button><button id="fin" hidden title="End the ride and save it">Finish</button>
   <span>POWER</span>
   <input id="pwr" type="range" min="0" max="600" step="5" value="220" aria-label="Power in watts">
   <span>↑ ↓ keys</span>
@@ -175,6 +192,10 @@
 <canvas id="map" aria-hidden="true"></canvas>
 <canvas id="prof" aria-hidden="true"></canvas>
 <div id="log" hidden></div>
+<div id="go" hidden><button id="gobtn">Start ride</button><div>or press Space</div></div>
+<div id="done" hidden><h3>Ride finished</h3><div class="sum" id="done-sum"></div>
+  <div class="acts"><button class="main" id="d-strava">Save for Strava</button><button id="d-file">Save file only</button><button id="d-more">Keep riding</button><button id="d-home">Courses</button></div>
+  <div class="note" id="d-note"></div></div>
 <div id="wk" hidden><div class="t" id="wk-name"></div><div class="now" id="wk-now"></div><div class="left" id="wk-left"></div>
   <div class="next" id="wk-next"></div><canvas id="wk-chart"></canvas><div class="tot" id="wk-tot"></div>
   <div class="row"><button id="wk-skip">Skip step</button><button id="wk-stop">End workout</button></div></div>
@@ -1778,6 +1799,106 @@ $('ergbtn').addEventListener('click', () => setErg(!ERG.on));
 $('eless').addEventListener('click', () => wkRun ? wkRun.nudge(-5) : setErg(true, ERG.w - 5));
 $('emore').addEventListener('click', () => wkRun ? wkRun.nudge(5) : setErg(true, ERG.w + 5));
 
+/* ---------- recording: start, pause, finish; saved as a TCX file for Strava ---------- */
+const REC = { state: 'ready', t0: 0, moving: 0, pts: [], saved: false };
+{
+  // local metres back to latitude and longitude: Swiss LV95 (swisstopo's formulas), or the British grid (Ordnance Survey's)
+  const fromLV95 = (E, N) => {
+    const y = (E - 2600000) / 1e6, x = (N - 1200000) / 1e6;
+    return [(16.9023892 + 3.238272 * x - 0.270978 * y * y - 0.002528 * x * x - 0.0447 * y * y * x - 0.014 * x ** 3) * 100 / 36,
+            (2.6779094 + 4.728982 * y + 0.791484 * y * x + 0.1306 * y * x * x - 0.0436 * y ** 3) * 100 / 36];
+  };
+  const fromBNG = (E, N) => {
+    const a = 6377563.396, b = 6356256.909, F0 = 0.9996012717, la0 = 49 * Math.PI / 180, lo0 = -2 * Math.PI / 180, e2 = 1 - b * b / (a * a), n = (a - b) / (a + b);
+    const Mf = p => { const d = p - la0, s = p + la0; return b * F0 * ((1 + n + 1.25 * n * n + 1.25 * n ** 3) * d - (3 * n + 3 * n * n + 2.625 * n ** 3) * Math.sin(d) * Math.cos(s)
+      + (1.875 * n * n + 1.875 * n ** 3) * Math.sin(2 * d) * Math.cos(2 * s) - 35 / 24 * n ** 3 * Math.sin(3 * d) * Math.cos(3 * s)); };
+    let p = la0, M = 0;
+    do { p = (N + 100000 - M) / (a * F0) + p; M = Mf(p); } while (Math.abs(N + 100000 - M) >= 0.00001);
+    const sn = Math.sin(p), c = Math.cos(p), t = Math.tan(p), nu = a * F0 / Math.sqrt(1 - e2 * sn * sn), rho = a * F0 * (1 - e2) / (1 - e2 * sn * sn) ** 1.5, eta2 = nu / rho - 1;
+    const dE = E - 400000, sec = 1 / c;
+    let lat = p - t / (2 * rho * nu) * dE ** 2 + t / (24 * rho * nu ** 3) * (5 + 3 * t * t + eta2 - 9 * t * t * eta2) * dE ** 4 - t / (720 * rho * nu ** 5) * (61 + 90 * t * t + 45 * t ** 4) * dE ** 6;
+    let lon = lo0 + sec / nu * dE - sec / (6 * nu ** 3) * (nu / rho + 2 * t * t) * dE ** 3 + sec / (120 * nu ** 5) * (5 + 28 * t * t + 24 * t ** 4) * dE ** 5
+      - sec / (5040 * nu ** 7) * (61 + 662 * t * t + 1320 * t ** 4 + 720 * t ** 6) * dE ** 7;
+    // OSGB36 to WGS84: through earth-centred coordinates, with the Helmert shift
+    const v = a / Math.sqrt(1 - e2 * Math.sin(lat) ** 2);
+    const x = v * Math.cos(lat) * Math.cos(lon), y = v * Math.cos(lat) * Math.sin(lon), z = (1 - e2) * v * Math.sin(lat);
+    const sc = -20.4894e-6, rx = 0.1502 / 206265, ry = 0.247 / 206265, rz = 0.8421 / 206265;
+    const x2 = 446.448 + (1 + sc) * x - rz * y + ry * z, y2 = -125.157 + rz * x + (1 + sc) * y - rx * z, z2 = 542.06 - ry * x + rx * y + (1 + sc) * z;
+    const A = 6378137, B = 6356752.3142, E2 = 1 - B * B / (A * A), pr = Math.hypot(x2, y2);
+    let q = Math.atan2(z2, pr * (1 - E2));
+    for (let i = 0; i < 10; i++) { const nv = A / Math.sqrt(1 - E2 * Math.sin(q) ** 2); q = Math.atan2(z2 + E2 * nv * Math.sin(q), pr); }
+    return [q * 180 / Math.PI, Math.atan2(y2, x2) * 180 / Math.PI];
+  };
+  const where = real ? (real.crs === 'LV95' ? fromLV95 : fromBNG) : null;       // the invented valley has no place on Earth: no GPS
+  const here = mkPose();
+  const sample = () => {
+    at(st.s, here);
+    const pt = { t: Date.now(), ele: here.p.y, d: st.dist - REC.d0, v: st.v, w: Math.round(st.power), hr: st.hr && performance.now() - st.hrAt < 5000 ? st.hr : 0, cad: st.cad || 0 };
+    if (where) [pt.lat, pt.lon] = where(real.origin[0] + here.p.x, real.origin[1] - here.p.z);
+    REC.pts.push(pt);
+  };
+  const fmt = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+  const setState = n => {
+    REC.state = n;
+    $('go').hidden = n !== 'ready'; $('rec').hidden = n === 'ready' || n === 'done'; $('fin').hidden = n === 'ready' || n === 'done';
+    $('rec').textContent = n === 'paused' ? 'Resume' : 'Pause'; $('rec').classList.toggle('on', n === 'paused');
+    $('done').hidden = n !== 'done';
+  };
+  const start = () => { if (REC.state === 'ready') { REC.t0 = Date.now(); REC.d0 = st.dist; } setState('riding'); };
+  const pause = () => setState(REC.state === 'riding' ? 'paused' : 'riding');
+  const finish = () => {
+    if (REC.state === 'ready') return;
+    setState('done');
+    const P = REC.pts, n = P.length || 1, dist = P.length ? P[P.length - 1].d : 0;
+    let climb = 0; for (let i = 1; i < P.length; i++) climb += Math.max(0, P[i].ele - P[i - 1].ele);
+    const avg = k => { const v = P.filter(p => p[k] > 0); return v.length ? Math.round(v.reduce((a, p) => a + p[k], 0) / v.length) : 0; };
+    $('done-sum').innerHTML = [[fmt(REC.moving), 'moving time'], [(dist / 1000).toFixed(2), 'km'], [Math.round(climb), 'm climbed'],
+      [avg('w') || '–', 'avg watts'], [avg('hr') || '–', 'avg bpm'], [avg('cad') || '–', 'avg rpm']].map(([b, l]) => `<div><b>${b}</b><span>${l}</span></div>`).join('');
+    $('d-note').textContent = where ? 'Save for Strava downloads the ride as a TCX file and opens Strava’s upload page: drop the file there, then set the type to Virtual Ride, so it isn’t taken for a ride outdoors.'
+      : 'The valley is invented, so the file has no GPS track: Strava shows it as an indoor ride. Save for Strava downloads it and opens Strava’s upload page; drop the file there.';
+  };
+  const tcx = () => {
+    const P = REC.pts, iso = t => new Date(t).toISOString(), name = real ? COURSES[COURSE].name : 'Valley', last = P[P.length - 1];
+    const tp = p => `<Trackpoint><Time>${iso(p.t)}</Time>` + (p.lat !== undefined ? `<Position><LatitudeDegrees>${p.lat.toFixed(7)}</LatitudeDegrees><LongitudeDegrees>${p.lon.toFixed(7)}</LongitudeDegrees></Position>` : '')
+      + `<AltitudeMeters>${p.ele.toFixed(1)}</AltitudeMeters><DistanceMeters>${p.d.toFixed(1)}</DistanceMeters>` + (p.hr ? `<HeartRateBpm><Value>${p.hr}</Value></HeartRateBpm>` : '')
+      + (p.cad ? `<Cadence>${p.cad}</Cadence>` : '') + `<Extensions><ns3:TPX><ns3:Speed>${p.v.toFixed(2)}</ns3:Speed><ns3:Watts>${p.w}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>`;
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+<Activities><Activity Sport="Biking"><Id>${iso(REC.t0)}</Id>
+<Lap StartTime="${iso(REC.t0)}"><TotalTimeSeconds>${Math.round(REC.moving)}</TotalTimeSeconds><DistanceMeters>${last ? last.d.toFixed(1) : 0}</DistanceMeters><Calories>0</Calories><Intensity>Active</Intensity><TriggerMethod>Manual</TriggerMethod>
+<Track>
+${P.map(tp).join('\n')}
+</Track></Lap>
+<Notes>Golden Hour Ride: ${name}${wkRun || new URLSearchParams(location.search).get('workout') ? ', ' + (WORKOUTS[new URLSearchParams(location.search).get('workout')] || {}).name : ''} (indoor, virtual)</Notes>
+</Activity></Activities></TrainingCenterDatabase>
+`;
+  };
+  const download = () => {
+    if (!REC.pts.length) return false;
+    const d = new Date(REC.t0), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([tcx()], { type: 'application/vnd.garmin.tcx+xml' }));
+    a.download = `golden-hour-ride-${COURSE}-${stamp}.tcx`; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000); REC.saved = true; return true;
+  };
+  $('gobtn').onclick = start; $('rec').onclick = pause; $('fin').onclick = finish;
+  $('d-file').onclick = () => { if (download()) $('d-file').textContent = 'Saved'; };
+  $('d-strava').onclick = () => { if (download()) { window.open('https://www.strava.com/upload/select', '_blank', 'noopener'); $('d-strava').textContent = 'Saved: now drop it on Strava'; } };
+  $('d-more').onclick = () => setState('paused');
+  $('d-home').onclick = () => { location.href = location.pathname; };
+  addEventListener('keydown', e => {
+    if (e.code !== 'Space' || e.target.closest?.('input, button, select, textarea')) return;
+    e.preventDefault(); REC.state === 'ready' ? start() : REC.state !== 'done' && pause();
+  });
+  addEventListener('beforeunload', e => { if (REC.pts.length > 60 && !REC.saved) { e.preventDefault(); e.returnValue = ''; } });   // an unsaved ride: ask first
+  setInterval(() => {
+    if (REC.state !== 'riding') return;
+    REC.moving++; sample();
+    $('h-tm').textContent = fmt(REC.moving);
+  }, 1000);
+  if (SCENERY !== null) REC.state = 'riding'; else setState('ready');       // scenery mode just rides, and records nothing worth saving
+  st.rec = REC;
+}
+
 /* ---------- workout: walks ERG through the steps, with a panel showing where you are ---------- */
 let wkRun = null;
 {
@@ -1825,6 +1946,7 @@ let wkRun = null;
     $('wk-skip').onclick = () => { const i = stepAt(t); if (i < steps.length - 1) { t = starts[i + 1]; show(); } else finish(); };
     $('wk-stop').onclick = () => { if (!done) finish(); $('wk').hidden = true; };
     wkRun = {
+      hold() { this.last = performance.now(); },                // paused: the workout clock waits too
       tick() { const now = performance.now(); t += Math.min(1, (now - (this.last ?? now)) / 1000); this.last = now; if (t >= total) finish(); },   // real time, whatever the frame rate; a hidden tab pauses it
       show, nudge(d) { scale = Math.max(50, Math.min(150, scale + d)); lastW = -1; show(); },
     };
@@ -1894,6 +2016,22 @@ async function ftmsStart(server) {
   } catch (err) { bike.point = null; }                     // no FTMS, or control not given: power only
 }
 
+// Cycling Power Measurement: after the flags and the power come optional fields, in order; bit 5 means crank
+// revolutions are there (a count, and the time of the last one in 1/1024 s), from which the cadence follows.
+const crank = { revs: -1, at: 0, seen: 0 };
+function readCadence(d) {
+  const f = d.getUint16(0, true); let o = 4;
+  if (f & 1) o += 1; if (f & 4) o += 2; if (f & 16) o += 6;
+  if (!(f & 32) || d.byteLength < o + 4) return;
+  const revs = d.getUint16(o, true), at = d.getUint16(o + 2, true), now = performance.now();
+  if (crank.revs >= 0) {
+    const dr = (revs - crank.revs + 65536) % 65536, dt = ((at - crank.at + 65536) % 65536) / 1024;
+    if (dr > 0 && dt > 0) { st.cad = Math.min(200, Math.round(dr / dt * 60)); crank.seen = now; }
+    else if (now - crank.seen > 3000) st.cad = 0;                      // no new revolution for 3 s: stopped pedalling
+  }
+  crank.revs = revs; crank.at = at;
+}
+
 // give up on a slow Bluetooth step instead of hanging on it
 const within = (p, ms) => new Promise((ok, no) => { const t = setTimeout(() => no(new Error('timed out')), ms); p.then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); no(e); }); });
 const watched = new WeakSet();
@@ -1906,7 +2044,7 @@ async function useTrainer(dev) {
   const svc = await server.getPrimaryService('cycling_power');
   const ch = await svc.getCharacteristic('cycling_power_measurement');
   await ch.startNotifications();
-  ch.addEventListener('characteristicvaluechanged', e => { st.trainer = true; setTarget(e.target.value.getInt16(2, true)); });
+  ch.addEventListener('characteristicvaluechanged', e => { st.trainer = true; const d = e.target.value; setTarget(d.getInt16(2, true)); readCadence(d); });
   if (!watched.has(dev)) {
     watched.add(dev);
     dev.addEventListener('gattserverdisconnected', () => {
@@ -2232,7 +2370,7 @@ if (SCENERY !== null) { setClean(true); st.target = st.power = 90; if (SCENERY =
 const pulse = { ph: 0, c: null };
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
-  if (wkRun) wkRun.tick();
+  if (wkRun && REC.state === 'riding') wkRun.tick(); else if (wkRun) wkRun.hold();
   uTime.value += dt;
 
   // power -> speed: gravity, rolling resistance and air drag
@@ -2247,6 +2385,7 @@ function tick() {
     scene_t += dt;
     if (scene_t >= SCENE_PLAN[scene_i][1]) { scene_t = 0; scene_i = (scene_i + 1) % SCENE_PLAN.length; setWeather(SCENE_PLAN[scene_i][0]); }
   }
+  if (SCENERY === null && REC.state !== 'riding') st.v = Math.max(0, v - dt * 4);   // not started, paused or finished: roll to a stop
   st.s = (st.s + st.v * dt) % LEN; st.dist += st.v * dt;
   grade += (pose.t.y * 100 - grade) * Math.min(1, dt * 2);
 
