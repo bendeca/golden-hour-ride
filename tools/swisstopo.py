@@ -26,6 +26,13 @@ def fetch(url, path):
     open(path + '.part', 'wb').write(data); os.replace(path + '.part', path)
     return path
 
+TILES = 'tools/.cache/tiles'                         # swisstopo's tiles, shared by every course
+
+def tile(href):
+    """A tile file, downloaded once into the shared cache; returns its path."""
+    os.makedirs(TILES, exist_ok=True)
+    return fetch(href, os.path.join(TILES, os.path.basename(href)))
+
 def get(url, name):
     return open(fetch(url, os.path.join(CACHE, name)), 'rb').read()
 
@@ -74,7 +81,7 @@ class Tiles:
         import tifffile
         href = self.index.get(k)
         if not href: return None
-        try: return tifffile.imread(fetch(href, os.path.join(CACHE, os.path.basename(href)))).astype('float32')
+        try: return tifffile.imread(tile(href)).astype('float32')
         except Exception as ex: print('  tile failed', k, ex); return None
     def need(self, keys):
         keys = [k for k in keys if k not in self.g]

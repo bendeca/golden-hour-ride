@@ -21,22 +21,42 @@ COURSES = {
         'cell': 15,              # 15 m keeps the mesh near Leckhampton's size (693 x 693 against 620 x 620)
         'world': True,           # present day: aerial photo, 3D buildings and surveyed trees (build_course_world.py)
     },
+    'muttenz': {
+        'name': 'Muttenz – Gempen',
+        # a ridden loop (Strava GPX): Birsfelden – Muttenz – Wartenberg – Sulz – Schartenflue – Gempen – Arlesheim – Münchenstein
+        'gpx': 'tools/routes/muttenz.gpx',
+        'start': 0,
+        'margin': 1300,
+        'cell': 15,
+        'world': True,
+    },
 }
 COURSE = sys.argv[1] if len(sys.argv) > 1 else 'basel'
 C = COURSES[COURSE]
 use_cache(COURSE)
 
-# ---- route
-W = C['waypoints']
-url = 'https://routing.openstreetmap.de/routed-car/route/v1/driving/' + ';'.join(f'{lon},{lat}' for lat, lon in W) + '?overview=full&geometries=geojson'
-data = json.loads(get(url, 'route.json'))
-latlon = [(lat, lon) for lon, lat in data['routes'][0]['geometry']['coordinates']]
-print('router:', len(latlon), 'points,', round(data['routes'][0]['distance']), 'm')
+# ---- route: a recorded track (GPX), or the router through waypoints
+if C.get('gpx'):
+    import re
+    src = open(C['gpx']).read()
+    latlon = [(float(a), float(b)) for a, b in re.findall(r'<(?:trk|rte)pt[^>]*?lat="([-\d.]+)"[^>]*?lon="([-\d.]+)"', src)]
+    latlon += [(float(b), float(a)) for a, b in re.findall(r'<(?:trk|rte)pt[^>]*?lon="([-\d.]+)"[^>]*?lat="([-\d.]+)"', src)]
+    print('gpx:', len(latlon), 'points')
+else:
+    W = C['waypoints']
+    url = 'https://routing.openstreetmap.de/routed-car/route/v1/driving/' + ';'.join(f'{lon},{lat}' for lat, lon in W) + '?overview=full&geometries=geojson'
+    data = json.loads(get(url, 'route.json'))
+    latlon = [(lat, lon) for lon, lat in data['routes'][0]['geometry']['coordinates']]
+    print('router:', len(latlon), 'points,', round(data['routes'][0]['distance']), 'm')
 
 def hav(a, b):
     p1, p2 = math.radians(a[0]), math.radians(b[0]); dp = p2 - p1; dl = math.radians(b[1] - a[1])
     return 2 * 6371000 * math.asin(math.sqrt(math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2))
 out, i = [], 0                      # cut out-and-back spurs the router adds at waypoints
+if C.get('gpx'):                    # a recorded track has no spurs (and its hairpins must stay), but standing still leaves a cluster
+    for p in latlon:                # of jittery points: keep a point only once the rider has moved 3 m
+        if not out or hav(out[-1], p) >= 3: out.append(p)
+    i = len(latlon)
 while i < len(latlon):
     out.append(latlon[i]); skip, run, j = -1, 0, i + 1
     while j < len(latlon) and run < 600:
@@ -53,6 +73,8 @@ for a, b in zip(pts, pts[1:]):
     while d <= L:
         line.append((a[0] + (b[0] - a[0]) * d / L, a[1] + (b[1] - a[1]) * d / L)); d += STEP
     carry = L - (d - STEP)
+if C.get('gpx'):                    # GPS wanders a metre or two either way: average each point with its neighbours (10 m)
+    line = [line[0]] + [((line[k - 1][0] + line[k][0] + line[k + 1][0]) / 3, (line[k - 1][1] + line[k][1] + line[k + 1][1]) / 3) for k in range(1, len(line) - 1)] + [line[-1]]
 print('route:', len(line) * STEP, 'm after cleaning; gap between ends', round(math.hypot(line[0][0] - line[-1][0], line[0][1] - line[-1][1])), 'm')
 
 # ---- the square of terrain around the route, and the tiles it needs

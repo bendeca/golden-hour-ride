@@ -52,7 +52,7 @@ photo = np.zeros((W, W, 3), np.uint8); have = np.zeros((W, W), bool)
 def load_photo(k):
     href = otiles.get(k)
     if not href: return k, None
-    try: return k, tifffile.imread(S.fetch(href, os.path.join(CACHE, os.path.basename(href))))
+    try: return k, tifffile.imread(S.tile(href))
     except Exception as ex: print('  photo tile failed', k, ex); return k, None
 def paste(dst, k, img, mask=None):
     """Put a 1 km tile (2 m pixels, top-left at E i km, N j+1 km) into a W x W grid of the square."""
@@ -179,7 +179,7 @@ def building(el):
         far.append([round(bx), round(bz), round(w, 1), round(dd, 1), round(ang, 2), round(h, 1), 1 if ridge > 1.2 else 0, round(min(ridge, 12), 1), *[int(v) for v in rc]])
 
 for sh, (year, href) in sorted(sheets.items()):
-    path = S.fetch(href, os.path.join(CACHE, os.path.basename(href)))
+    path = S.tile(href)
     with zipfile.ZipFile(path) as zf:
         name = next(n for n in zf.namelist() if n.lower().endswith('.gml'))
         with zf.open(name) as fh:
@@ -200,30 +200,29 @@ built = np.array(fm.filter(ImageFilter.MaxFilter(5))) > 0
 stiles = S.km_tiles('ch.swisstopo.swisssurface3d-raster', E0, N0, E1, N1, lambda k: k.endswith('.tif'), 'surf')
 atiles = S.tile_index(E0, N0, E1, N1)
 chm = np.zeros((W, W), np.float32)
-CHM = os.path.join(CACHE, 'canopy_2m.npy')            # the result is kept: the 160 source tiles (2 GB) are not
+def canopy_file(k): return os.path.join(S.TILES, 'canopy_2m_%d_%d.npy' % k)   # kept per 1 km tile; the 14 MB sources are not
 def load_canopy(k):
+    if os.path.exists(canopy_file(k)): return k, np.load(canopy_file(k)).astype(np.float32)
     sh, ah = stiles.get(k), atiles.get(k)
     if not sh or not ah: return k, None
-    path = os.path.join(CACHE, os.path.basename(sh))
+    path = os.path.join(S.TILES, os.path.basename(sh))
     try:
         surf = tifffile.imread(S.fetch(sh, path)).astype(np.float32)
-        ground = tifffile.imread(S.fetch(ah, os.path.join(CACHE, os.path.basename(ah)))).astype(np.float32)
+        ground = tifffile.imread(S.tile(ah)).astype(np.float32)
     except Exception as ex: print('  canopy tile failed', k, ex); return k, None
     finally:
         if os.path.exists(path): os.remove(path)     # 14 MB each: keep only what was taken from it
     h, w = surf.shape; f = h // ground.shape[0]
     top = surf[:ground.shape[0] * f, :ground.shape[1] * f].reshape(ground.shape[0], f, ground.shape[1], f).max(axis=(1, 3))
     c = top - ground; c[(ground < -500) | (top < -500) | ~np.isfinite(c)] = 0     # no data: nothing standing
-    return k, np.clip(c, 0, 60)
-if os.path.exists(CHM): chm = np.load(CHM).astype(np.float32)
-else:
-    done = 0
-    with ThreadPoolExecutor(4) as ex:
-        for k, c in ex.map(load_canopy, want):
-            done += 1
-            if c is not None: paste(chm, k, c)
-            if done % 20 == 0: print('  canopy tiles %d of %d' % (done, len(want)))
-    np.save(CHM, chm.astype(np.float16))
+    c = np.clip(c, 0, 60); np.save(canopy_file(k), c.astype(np.float16))
+    return k, c
+done = 0
+with ThreadPoolExecutor(4) as ex:
+    for k, c in ex.map(load_canopy, want):
+        done += 1
+        if c is not None: paste(chm, k, c)
+        if done % 20 == 0: print('  canopy tiles %d of %d' % (done, len(want)))
 chm[built] = 0
 
 # trees: canopy peaks over 3 m, the highest point within 3 m around (so at least 4 m apart)
