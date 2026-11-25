@@ -50,6 +50,33 @@
   body.clean #hud, body.clean #ctl, body.clean #log, body.clean #credit, body.clean #map, body.clean #prof { display: none; }
   body.clean { cursor: none; }
   #credit { position: fixed; right: 14px; bottom: 10px; font-size: 10px; letter-spacing: .04em; opacity: .7; text-shadow: 0 1px 6px rgba(0,0,0,.7); max-width: 46vw; text-align: right; }
+  /* landing page: the courses and the settings, before the ride starts */
+  #start { position: fixed; inset: 0; z-index: 20; overflow: auto; padding: 0 16px;
+    background: radial-gradient(120% 90% at 70% 105%, #b8692c 0%, #5a3320 34%, #1d1612 70%, #0b0a09 100%); }
+  #start[hidden] { display: none; }
+  #start .panel { max-width: 680px; margin: 0 auto; padding: 56px 0 48px; }
+  #start h1 { margin: 0; font-size: 40px; font-weight: 300; letter-spacing: -.01em; }
+  #start .sub { margin: 8px 0 34px; color: #e8d6bd; opacity: .85; font-size: 15px; line-height: 1.45; }
+  #start h2 { margin: 30px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #ffcf8f; }
+  #s-courses { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  #s-courses button { width: 100%; display: flex; align-items: center; gap: 16px; text-align: left; font: inherit; color: #fff; cursor: pointer;
+    padding: 16px 18px; border-radius: 14px; background: rgba(20,16,12,.55); border: 1px solid rgba(255,255,255,.22); backdrop-filter: blur(6px); }
+  #s-courses button:hover, #s-courses button:focus-visible { background: rgba(40,30,22,.8); border-color: #ffcf8f; outline: none; }
+  #s-courses .nm { font-size: 18px; font-weight: 500; }
+  #s-courses .ab { margin-top: 4px; font-size: 13px; line-height: 1.4; color: #e8d6bd; opacity: .85; }
+  #s-courses .go { margin-left: auto; flex: none; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #ffcf8f; }
+  #start .set { display: grid; grid-template-columns: 150px 1fr; gap: 14px 16px; align-items: center; font-size: 13px; }
+  #start .set label { color: #e8d6bd; }
+  #start .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  #start .seg button { font: inherit; font-size: 12px; color: #fff; background: rgba(20,16,12,.45); border: 1px solid rgba(255,255,255,.3);
+    border-radius: 999px; padding: 7px 13px; cursor: pointer; }
+  #start .seg button.on { background: rgba(255,255,255,.28); border-color: #fff; }
+  #start input[type=range] { width: min(260px, 100%); accent-color: #ffcf8f; vertical-align: middle; }
+  #start input[type=number] { width: 80px; font: inherit; color: #fff; background: rgba(20,16,12,.5); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 8px; }
+  #start input[type=checkbox] { accent-color: #ffcf8f; width: 16px; height: 16px; vertical-align: middle; }
+  #start .val { display: inline-block; min-width: 64px; margin-left: 10px; }
+  #start .note { margin-top: 30px; font-size: 12px; line-height: 1.5; color: #e8d6bd; opacity: .7; }
+  @media (max-width: 520px) { #start .set { grid-template-columns: 1fr; gap: 6px 0; } #start .set label { margin-top: 10px; } #start h1 { font-size: 32px; } }
 </style>
 <script type="importmap">
 { "imports": {
@@ -59,6 +86,23 @@
 </script>
 </head>
 <body>
+<div id="start" hidden>
+  <div class="panel">
+    <h1>Golden Hour Ride</h1>
+    <p class="sub">An indoor ride in the browser, on an invented mountain valley or on real roads built from survey data. Pick the settings, then a course.</p>
+    <h2>Settings</h2>
+    <div class="set">
+      <label>Weather</label><div class="seg" id="s-wx"></div>
+      <label for="s-hills">Hills on the trainer</label><div><input id="s-hills" type="range" min="0" max="100" step="10"><span class="val" id="s-hval"></span></div>
+      <label for="s-maxhr">Maximum heart rate</label><div><input id="s-maxhr" type="number" min="120" max="230" step="1"> <span class="val">bpm, sets the five zones</span></div>
+      <label for="s-xmas">Christmas</label><div><input id="s-xmas" type="checkbox"> <span class="val">snow, dusk and lights in the trees (valley only)</span></div>
+      <label>Scenery mode</label><div class="seg" id="s-scn"><button data-v="">Off</button><button data-v="1">On</button><button data-v="nobars">On, no handlebars</button></div>
+    </div>
+    <h2>Courses</h2>
+    <ul id="s-courses"></ul>
+    <p class="note">Scenery mode rides itself at a gentle pace with nothing on screen, for leaving on in the background. Connect a smart trainer and a heart-rate strap with the buttons at the top once the ride opens (Chrome or Edge); both are remembered for next time.</p>
+  </div>
+</div>
 <canvas id="c"></canvas>
 <div id="pulse"></div>
 <div id="hud">
@@ -74,7 +118,7 @@
   <span>↑ ↓ keys</span>
   <button id="skip" title="Jump 250 m up the road (→ key; ← goes back)">Skip 250 m ›</button>
   <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full">Voice: off</button>
-  <button id="course" title="Switch between the invented valley and the real courses: Leckhampton Hill, and the Gempen loop above Basel">Course</button>
+  <button id="course" title="Back to the list of courses and the settings">Course</button>
   <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
   <button id="bt">Connect trainer</button>
   <button id="hr" title="A Bluetooth heart-rate strap or watch that broadcasts heart rate">Connect HR</button>
@@ -161,7 +205,52 @@ scene.add(camera);
 
 /* real courses, built from survey data by the scripts in tools/: ?course=<key> */
 // left: an English road, ridden on the left side
-const COURSES = { leckhampton: { name: 'Leckhampton', loading: 'Building Leckhampton Hill…', left: true }, basel: { name: 'Gempen', loading: 'Building the Gempen loop…' } };
+const COURSES = {
+  leckhampton: { name: 'Leckhampton', loading: 'Building Leckhampton Hill…', left: true,
+    about: 'Leckhampton Hill, Cheltenham, England · 11.9 km loop · built from Environment Agency lidar, dressed as the 19th-century hill' },
+  basel: { name: 'Gempen', loading: 'Building the Gempen loop…',
+    about: 'Above Basel, Switzerland · 27.3 km loop, 545 m of climbing, up the Gempenstrasse · present day, on the swisstopo aerial photo with every surveyed tree' },
+};
+// Landing page: shown when the address names no course. Choosing one starts the ride right here, without a reload.
+{
+  const q0 = new URLSearchParams(location.search);
+  if (!q0.has('course') && q0.get('scenery') === null) await new Promise(go => {
+    const get = (k, d) => { try { const v = localStorage.getItem('golden-hour-ride-' + k); return v === null ? d : v; } catch { return d; } };
+    const put = (k, v) => { try { localStorage.setItem('golden-hour-ride-' + k, String(v)); } catch {} };
+    const lab = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
+    const set = { weather: get('weather', 'golden'), hills: +get('hills', 50), maxhr: +get('maxhr', 190), xmas: get('christmas', '0') === '1', scenery: get('scenery', '') };
+    const seg = (id, items, cur, pick) => {
+      const el = $(id); el.innerHTML = '';
+      for (const [v, label] of items) {
+        const b = document.createElement('button'); b.textContent = label; b.dataset.v = v; b.classList.toggle('on', v === cur);
+        b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); pick(v); };
+        el.append(b);
+      }
+    };
+    seg('s-wx', [['golden', 'Golden'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['mist', 'Mist'], ...(lab ? [['starry', 'Starry']] : [])], set.weather, v => set.weather = v);
+    seg('s-scn', [['', 'Off'], ['1', 'On'], ['nobars', 'On, no handlebars']], set.scenery, v => set.scenery = v);
+    const hl = () => $('s-hval').textContent = set.hills ? set.hills + ' %' : 'off';
+    $('s-hills').value = set.hills; hl(); $('s-hills').oninput = e => { set.hills = +e.target.value; hl(); };
+    $('s-maxhr').value = set.maxhr; $('s-maxhr').onchange = e => { const v = Math.round(+e.target.value); if (v >= 120 && v <= 230) set.maxhr = v; else e.target.value = set.maxhr; };
+    $('s-xmas').checked = set.xmas; $('s-xmas').onchange = e => set.xmas = e.target.checked;
+    const list = [['valley', { name: 'Valley', about: 'An invented mountain valley in the evening sun · a loop, gentle climbs' }], ...Object.entries(COURSES)];
+    for (const [key, c] of list) {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.innerHTML = `<div><div class="nm"></div><div class="ab"></div></div><span class="go">Ride ›</span>`;
+      b.querySelector('.nm').textContent = c.name; b.querySelector('.ab').textContent = c.about;
+      b.onclick = () => {
+        put('weather', set.weather); put('hills', set.hills); put('maxhr', set.maxhr); put('christmas', set.xmas ? 1 : 0); put('scenery', set.scenery);
+        const p = new URLSearchParams({ course: key, weather: set.weather });
+        if (set.xmas && key === 'valley') p.set('theme', 'christmas');
+        if (set.scenery) p.set('scenery', set.scenery === '1' ? '' : set.scenery);
+        history.replaceState(null, '', location.pathname + '?' + p.toString());
+        $('start').hidden = true; go();
+      };
+      li.append(b); $('s-courses').append(li);
+    }
+    $('start').hidden = false;
+  });
+}
 /* ---------- sky, sun, haze ---------- */
 // ?theme=christmas: the same valley under snow at dusk, with lights in the trees and a few chalets
 const XMAS = new URLSearchParams(location.search).get('theme') === 'christmas' && !COURSES[new URLSearchParams(location.search).get('course')];
@@ -254,10 +343,7 @@ if (COURSE !== 'valley') {
   $('credit').textContent = real.credit + ' ' + real.osm.credit;
 }
 $('course').textContent = 'Course: ' + (real ? COURSES[COURSE].name : 'Valley');
-$('course').addEventListener('click', () => {          // valley, then each real course in turn
-  const order = ['valley', ...Object.keys(COURSES)], next = order[(order.indexOf(COURSE) + 1) % order.length];
-  location.search = next === 'valley' ? '' : '?course=' + next;
-});
+$('course').addEventListener('click', () => { location.href = location.pathname; });   // back to the landing page and its list of courses
 const WORLD = !!(real && real.world);          // a present-day course: the photo on the ground, real buildings and trees
 function demH(x, z) {                 // the real ground under a point
   const g = real.cells, w = g + 1, f = v => Math.min(g - 1e-6, Math.max(0, (v + real.size / 2) / (real.size / g)));
@@ -1323,11 +1409,13 @@ function stepWeather(dt) {
   road.material.roughness = wx.rough; road.material.color.setScalar(wx.tint);     // wet tarmac: darker and glossier
   renderer.toneMappingExposure = wx.expo;
 }
-document.querySelectorAll('#wx button').forEach(b => b.addEventListener('click', () => setWeather(b.dataset.w)));
+document.querySelectorAll('#wx button').forEach(b => b.addEventListener('click', () => { setWeather(b.dataset.w); try { localStorage.setItem('golden-hour-ride-weather', b.dataset.w); } catch {} }));
 // Starry is still being worked on: it only appears on the local copy, not the hosted site.
 const LAB = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
 if (!LAB) document.querySelector('#wx [data-w="starry"]')?.remove();
 if (!XMAS) document.querySelector('#wx [data-w="snow"]')?.remove(); else setWeather('snow', true);
+{ const w = new URLSearchParams(location.search).get('weather');                // ?weather=overcast and so on, from the landing page
+  if (!XMAS && w && w !== 'golden' && document.querySelector(`#wx [data-w="${CSS.escape(w)}"]`)) setWeather(w, true); }
 addEventListener('keydown', e => { const n = ['golden', 'overcast', 'rain', 'mist', LAB && 'starry'][+e.key - 1]; if (n) setWeather(n); });
 
 /* ---------- cockpit ---------- */
