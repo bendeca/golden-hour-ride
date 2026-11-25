@@ -23,6 +23,7 @@ cE, cN = course['origin']; SIZE, CELLS = course['size'], course['cells']; HALF =
 E0, N0, E1, N1 = cE - HALF, cN - HALF, cE + HALF, cN + HALF
 PX = 2.0; W = int(round(SIZE / PX))                  # the 2 m working grid over the whole square; row 0 is the north edge
 ORTHO = 4096                                         # the picture the page gets: 4096 px across, about 2.5 m a pixel
+BUILDINGS = False                                    # draw buildings? Off: they are still read, to keep trees off the roofs
 NEAR = 150                                           # buildings this close to the road get their real shape
 TREE_ALL, TREE_FAR, TREE_CAP = 250, 900, 60000       # every tree within 250 m of the road, fewer out to 900 m, at most 60k
 
@@ -258,10 +259,10 @@ print('forest: %.1f km2 of %.1f' % (sum(mask) * CELL ** 2 / 1e6, SIZE ** 2 / 1e6
 
 b64 = lambda a: base64.b64encode(a).decode()
 out = {
-    'near': {'a': b64(np.array(near_a, np.float32).tobytes()), 'n': b64(np.array(near_n, np.uint16).tobytes()), 'm': b64(np.array(near_m, np.uint16).tobytes()),
+    'near': {} if not BUILDINGS else {'a': b64(np.array(near_a, np.float32).tobytes()), 'n': b64(np.array(near_n, np.uint16).tobytes()), 'm': b64(np.array(near_m, np.uint16).tobytes()),
              'v': b64(np.array(near_v, np.int16).tobytes()), 'i': b64(np.array(near_i, np.uint16).tobytes()), 'c': b64(bytes(near_c)), 'radius': NEAR},
-    'far': far, 'trees': b64(trees), 'woods': b64(bytes(bits)),
-    'credit': 'Aerial photo, buildings and trees: SWISSIMAGE, swissBUILDINGS3D, swissSURFACE3D © swisstopo.',
+    'far': far if BUILDINGS else [], 'trees': b64(trees), 'woods': b64(bytes(bits)),
+    'credit': ('Aerial photo, buildings and trees' if BUILDINGS else 'Aerial photo and trees') + ': SWISSIMAGE, swissBUILDINGS3D, swissSURFACE3D © swisstopo.',
 }
 open(f'assets/{COURSE}_world.js', 'w').write(f'window.RIDE_COURSES.{COURSE}.world = ' + json.dumps(out, separators=(',', ':')) + ';\n')
 print(f'wrote assets/{COURSE}_world.js', os.path.getsize(f'assets/{COURSE}_world.js') // 1024, 'KB')
