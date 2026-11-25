@@ -996,24 +996,29 @@ if (XMAS) {
   const trunkGeo = real ? new THREE.CylinderGeometry(0.16, 0.3, 5.2, 6).translate(0, 2.6, 0) : new THREE.CylinderGeometry(0.04, 0.25, 10.8, 6).translate(0, 5.4, 0);
   const spots = [];
   const built = new Set(), cellKey = (x, z) => Math.floor(x / 10) * 4096 + Math.floor(z / 10);
+  // a crown must stay off the road: the tarmac is 3.5 m each side of the centre, plus half a metre, plus the crown's
+  // own reach (broadleaf cards span 4.2 m at scale 1, up to 1.15 times wider; a conifer is 0.23 of its height, as much again)
+  const clear = (x, z, reach) => { const nr = nearRoad(x, z); return !nr || nr.d > 4 + reach; };
+  const BROAD = 4.2 * 1.15, CONE = 0.23 * 1.15;
   if (real) {
     for (const [bx, bz, w] of real.osm.buildings) for (let dx = -w / 2 - 4; dx <= w / 2 + 4; dx += 10) for (let dz = -w / 2 - 4; dz <= w / 2 + 4; dz += 10) built.add(cellKey(bx + dx, bz + dz));
-    for (const [x, z] of real.osm.trees) { const nr = nearRoad(x, z); if (!nr || nr.d > 5.5) spots.push([x, meshH(x, z), z]); }     // mapped street and field trees
+    for (const [x, z] of real.osm.trees) { const s = 0.9 + rnd() * 0.9; if (clear(x, z, BROAD * s)) spots.push([x, meshH(x, z), z, s]); }     // mapped street and field trees
   }
   const conifers = [];
   if (WORLD) {             // surveyed trees, where they stand and as tall as they are; the darkest crowns are spruce and fir
     const raw = Uint8Array.from(atob(real.world.trees), c => c.charCodeAt(0)), dv = new DataView(raw.buffer);
     for (let o = 0; o + 6 <= raw.length; o += 6) {
       const x = dv.getInt16(o, true) / 2, z = dv.getInt16(o + 2, true) / 2, h = dv.getUint8(o + 4) / 4, k = dv.getUint8(o + 5), nr = nearRoad(x, z);
-      if (nr && nr.d < 5) continue;
-      (k ? conifers : spots).push([x, meshH(x, z), z, Math.max(0.3, h / (k ? 1 : 10.8))]);
+      const s = Math.max(0.3, h / (k ? 1 : 10.8));
+      if (!clear(x, z, (k ? CONE : BROAD) * s)) continue;
+      (k ? conifers : spots).push([x, meshH(x, z), z, s]);
     }
     st0.surveyedTrees = spots.length + conifers.length;
   }
   const cap = WORLD ? spots.length + conifers.length + 14000 : real ? 26000 : 7000;     // the present day: fill the distant woods too
   for (let n = 0; n < (real ? 320000 : 70000) && spots.length + conifers.length < cap; n++) {
     const x = (rnd() - 0.5) * TS * 0.78, z = (rnd() - 0.5) * TS * 0.78, nr = nearRoad(x, z), d = nr ? nr.d : 999;
-    if (d < 11) continue;
+    if (d < (real ? 13 : 11)) continue;             // the widest broadleaf crown (scale 1.8) stays off the road; pines are narrower
     if (chalets.some(c => (c[0] - x) ** 2 + (c[1] - z) ** 2 < 170)) continue;
     const forest = fbm(x / 140 + 3, z / 140 + 7, 3);
     if (real) {            // trees where the map says there is woodland, and never on a building
