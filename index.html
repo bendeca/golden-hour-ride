@@ -27,6 +27,11 @@
   #hills { display: flex; gap: 4px; align-items: center; }
   #hills button { min-width: 30px; padding-left: 0; padding-right: 0; }
   #hval { min-width: 74px; text-align: center; }
+  #erg { display: flex; gap: 4px; align-items: center; }
+  #erg .adj { min-width: 30px; padding-left: 0; padding-right: 0; }
+  #erg:not(.on) .adj, #erg:not(.on) #eval { display: none; }
+  #eval { min-width: 52px; text-align: center; }
+  #hills.dim { opacity: .4; }
   #log { position: fixed; top: 64px; right: 18px; width: 270px; max-height: 70vh; overflow: auto; padding: 14px 16px; border-radius: 14px;
     background: rgba(20,16,12,.72); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(8px); font-size: 13px; color: #fff; }
   #log .zbar { display: flex; width: 54px; height: 4px; margin-top: 3px; border-radius: 2px; overflow: hidden; }
@@ -95,6 +100,7 @@
       <label>Weather</label><div class="seg" id="s-wx"></div>
       <label for="s-hills">Hills on the trainer</label><div><input id="s-hills" type="range" min="0" max="100" step="10"><span class="val" id="s-hval"></span></div>
       <label for="s-maxhr">Maximum heart rate</label><div><input id="s-maxhr" type="number" min="120" max="230" step="1"> <span class="val">bpm, sets the five zones</span></div>
+      <label for="s-erg">ERG mode</label><div><input id="s-erg" type="checkbox"> <input id="s-ergw" type="number" min="50" max="600" step="5"> <span class="val">W the trainer holds, whatever the road does</span></div>
       <label for="s-xmas">Christmas</label><div><input id="s-xmas" type="checkbox"> <span class="val">snow, dusk and lights in the trees (valley only)</span></div>
       <label>Scenery mode</label><div class="seg" id="s-scn"><button data-v="">Off</button><button data-v="1">On</button><button data-v="nobars">On, no handlebars</button></div>
     </div>
@@ -117,13 +123,14 @@
   <input id="pwr" type="range" min="0" max="600" step="5" value="220" aria-label="Power in watts">
   <span>↑ ↓ keys</span>
   <button id="skip" title="Jump 250 m up the road (→ key; ← goes back)">Skip 250 m ›</button>
-  <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full">Voice: off</button>
+  <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full; ERG, ERG off (in ERG, easier and harder change the power by 10 W)">Voice: off</button>
   <button id="course" title="Back to the list of courses and the settings">Course</button>
   <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
   <button id="bt">Connect trainer</button>
   <button id="hr" title="A Bluetooth heart-rate strap or watch that broadcasts heart rate">Connect HR</button>
   <button id="maxhr" hidden title="Your maximum heart rate, which sets the five zones. Click to change it">Max HR 190</button>
   <span id="hills" title="How much of each hill a smart trainer makes you feel. Turn it down if the climbs are too hard; 0 % is flat."><button id="hless" aria-label="Make hills easier">−</button><span id="hval">Hills 50 %</span><button id="hmore" aria-label="Make hills harder">+</button></span>
+  <span id="erg" title="ERG mode: the trainer holds the power you set, whatever your cadence and whatever the road does. − and + (or the ↑ ↓ keys) change it by 5 W"><button id="ergbtn">ERG off</button><button class="adj" id="eless" aria-label="Less power">−</button><span id="eval">200 W</span><button class="adj" id="emore" aria-label="More power">+</button></span>
   <button id="clean" title="Hide everything on screen (H key, or say “hide”). Press H, click, or say “show” to bring it back">Hide info</button>
   <button id="logbtn" title="Distance you have ridden, kept in this browser">Log</button>
 </div>
@@ -220,7 +227,7 @@ const COURSES = {
     const get = (k, d) => { try { const v = localStorage.getItem('golden-hour-ride-' + k); return v === null ? d : v; } catch { return d; } };
     const put = (k, v) => { try { localStorage.setItem('golden-hour-ride-' + k, String(v)); } catch {} };
     const lab = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
-    const set = { weather: get('weather', 'golden'), hills: +get('hills', 50), maxhr: +get('maxhr', 190), xmas: get('christmas', '0') === '1', scenery: get('scenery', '') };
+    const set = { weather: get('weather', 'golden'), hills: +get('hills', 50), maxhr: +get('maxhr', 190), xmas: get('christmas', '0') === '1', scenery: get('scenery', ''), erg: get('erg', '0') === '1', ergw: +get('ergw', 200) };
     const seg = (id, items, cur, pick) => {
       const el = $(id); el.innerHTML = '';
       for (const [v, label] of items) {
@@ -234,6 +241,8 @@ const COURSES = {
     const hl = () => $('s-hval').textContent = set.hills ? set.hills + ' %' : 'off';
     $('s-hills').value = set.hills; hl(); $('s-hills').oninput = e => { set.hills = +e.target.value; hl(); };
     $('s-maxhr').value = set.maxhr; $('s-maxhr').onchange = e => { const v = Math.round(+e.target.value); if (v >= 120 && v <= 230) set.maxhr = v; else e.target.value = set.maxhr; };
+    $('s-erg').checked = set.erg; $('s-erg').onchange = e => set.erg = e.target.checked;
+    $('s-ergw').value = set.ergw; $('s-ergw').onchange = e => { const v = Math.round(+e.target.value / 5) * 5; if (v >= 50 && v <= 600) { set.ergw = v; e.target.value = v; } else e.target.value = set.ergw; };
     $('s-xmas').checked = set.xmas; $('s-xmas').onchange = e => set.xmas = e.target.checked;
     const list = [['valley', { name: 'Valley', about: 'An invented mountain valley in the evening sun · a loop, gentle climbs' }], ...Object.entries(COURSES)];
     for (const [key, c] of list) {
@@ -241,7 +250,7 @@ const COURSES = {
       b.innerHTML = `<div><div class="nm"></div><div class="ab"></div></div><span class="go">Ride ›</span>`;
       b.querySelector('.nm').textContent = c.name; b.querySelector('.ab').textContent = c.about;
       b.onclick = () => {
-        put('weather', set.weather); put('hills', set.hills); put('maxhr', set.maxhr); put('christmas', set.xmas ? 1 : 0); put('scenery', set.scenery);
+        put('weather', set.weather); put('hills', set.hills); put('maxhr', set.maxhr); put('christmas', set.xmas ? 1 : 0); put('scenery', set.scenery); put('erg', set.erg ? 1 : 0); put('ergw', set.ergw);
         const p = new URLSearchParams({ course: key, weather: set.weather });
         if (set.xmas && key === 'valley') p.set('theme', 'christmas');
         if (set.scenery) p.set('scenery', set.scenery === '1' ? '' : set.scenery);
@@ -1556,8 +1565,8 @@ st.weather = (n, i) => setWeather(n, i);
 const skip = m => { st.s = (((st.s + m) % LEN) + LEN) % LEN; };
 const setTarget = w => { st.target = Math.min(900, Math.max(0, w)); $('pwr').value = st.target; };
 addEventListener('keydown', e => {
-  if (e.key === 'ArrowUp') setTarget(st.target + 10);
-  if (e.key === 'ArrowDown') setTarget(st.target - 10);
+  if (e.key === 'ArrowUp') ERG.on ? setErg(true, ERG.w + 10) : setTarget(st.target + 10);
+  if (e.key === 'ArrowDown') ERG.on ? setErg(true, ERG.w - 10) : setTarget(st.target - 10);
   if (e.key === 'ArrowRight') skip(250);
   if (e.key === 'ArrowLeft') skip(-250);
 });
@@ -1595,11 +1604,35 @@ const TRAINER_KEY = 'golden-hour-ride-trainer';     // the last trainer used: { 
 const lastTrainer = () => { try { return JSON.parse(localStorage.getItem(TRAINER_KEY)) || null; } catch { return null; } };
 const btLabel = () => {
   const last = lastTrainer();
-  $('bt').textContent = bike.dev ? (bike.point ? 'Trainer: power and gradient' : 'Trainer: power only')
+  $('bt').textContent = bike.dev ? (bike.point ? (ERG.on ? 'Trainer: ERG' : 'Trainer: power and gradient') : 'Trainer: power only')
     : bike.known || (last && navigator.bluetooth && navigator.bluetooth.getDevices) ? 'Reconnect trainer' : 'Connect trainer';
 };
 $('hless').addEventListener('click', () => setHills(HILLS * 100 - 10));
 $('hmore').addEventListener('click', () => setHills(HILLS * 100 + 10));
+
+// ERG mode: the trainer is told a power to hold (FTMS Set Target Power) instead of the gradient. Kept in this browser;
+// ?erg=200 turns it on at 200 W for one visit. Without a trainer, the ride simply holds that power.
+const ERG_KEY = 'golden-hour-ride-erg', ERGW_KEY = 'golden-hour-ride-ergw', OP_POWER = 0x05;
+const ERG = (() => {
+  let on = false, w = 200;
+  try { on = localStorage.getItem(ERG_KEY) === '1'; const k = localStorage.getItem(ERGW_KEY); if (k !== null && isFinite(+k)) w = +k; } catch {}
+  const q = new URLSearchParams(location.search).get('erg');
+  if (q !== null && q !== '') { if (isFinite(+q) && +q > 0) { on = true; w = +q; } else if (q === '0' || q === 'off') on = false; }
+  return { on, w };
+})();
+const setErg = (on, w = ERG.w) => {
+  ERG.on = on; ERG.w = Math.max(50, Math.min(600, Math.round(w / 5) * 5));
+  try { localStorage.setItem(ERG_KEY, on ? '1' : '0'); localStorage.setItem(ERGW_KEY, String(ERG.w)); } catch {}
+  $('erg').classList.toggle('on', on); $('ergbtn').classList.toggle('on', on);
+  $('ergbtn').textContent = on ? 'ERG' : 'ERG off'; $('eval').textContent = ERG.w + ' W';
+  $('hills').classList.toggle('dim', on);
+  if (on && !st.trainer) setTarget(ERG.w);           // no trainer: the rider holds it
+  bike.at = 0; bike.ergSent = null;                 // tell the trainer straight away
+  btLabel();
+};
+$('ergbtn').addEventListener('click', () => setErg(!ERG.on));
+$('eless').addEventListener('click', () => setErg(true, ERG.w - 5));
+$('emore').addEventListener('click', () => setErg(true, ERG.w + 5));
 
 // write one command to the control point and wait for the trainer's reply to it
 const ftmsAsk = (point, bytes) => new Promise((ok, no) => {
@@ -1628,6 +1661,7 @@ function simParams(gradePct) {
 
 // about once a second, or sooner when the gradient has moved by more than 0.5 %
 async function sendGrade() {
+  if (ERG.on) return sendPower();
   const now = performance.now(), g = Math.max(-20, Math.min(20, grade)) * (grade > 0 ? HILLS : HILLS * 0.5), wait = now - bike.at;
   if (!bike.point || bike.busy || wait < 250 || (wait < 1000 && Math.abs(g - bike.sent) <= 0.5)) return;
   bike.busy = true; bike.at = now;
@@ -1637,6 +1671,18 @@ async function sendGrade() {
     // three misses in a row: give up on gradient and carry on with power only
     if (bike.point === point && ++bike.fails >= 3) { bike.point = null; clearInterval(bike.timer); btLabel(); }
   }
+  bike.busy = false;
+}
+
+// ERG: the target power, whenever it changes and again every 5 s in case one was missed
+async function sendPower() {
+  const now = performance.now();
+  if (!bike.point || bike.busy || (bike.ergSent === ERG.w && now - bike.at < 5000)) return;
+  bike.busy = true; bike.at = now;
+  const point = bike.point, w = ERG.w, d = new DataView(new ArrayBuffer(3));
+  d.setUint8(0, OP_POWER); d.setInt16(1, w, true);
+  try { await point.writeValueWithResponse(d); bike.ergSent = w; bike.fails = 0; }
+  catch (err) { if (bike.point === point && ++bike.fails >= 3) { bike.point = null; clearInterval(bike.timer); btLabel(); } }
   bike.busy = false;
 }
 
@@ -1718,6 +1764,7 @@ $('bt').addEventListener('click', async () => {
 });
 btLabel();
 setHills(HILLS * 100);
+setErg(ERG.on, ERG.w);
 
 /* Heart-rate strap or watch: the standard Heart Rate service, read only. A separate device from the trainer,
    with its own button; remembered and reconnected the same way. */
@@ -1853,8 +1900,10 @@ hrLabel();
 {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition, btn = $('voice');
   const WORDS = [                      // the first match in what was heard wins
-    [/\b(easier|easy|lighter|less|ease|gear down|shift down|change down|lower gear|down a gear)\b/, () => $('hval').textContent, () => setHills(HILLS * 100 - 20)],
-    [/\b(harder|hard|heavier|more|tougher|gear up|shift up|change up|higher gear|up a gear)\b/, () => $('hval').textContent, () => setHills(HILLS * 100 + 20)],
+    [/\b(erg off|stop erg|no erg)\b/, 'ERG off', () => setErg(false)],
+    [/\b(erg|erg on|erg mode)\b/, () => 'ERG ' + ERG.w + ' W', () => setErg(true)],
+    [/\b(easier|easy|lighter|less|ease|gear down|shift down|change down|lower gear|down a gear)\b/, () => ERG.on ? 'ERG ' + ERG.w + ' W' : $('hval').textContent, () => ERG.on ? setErg(true, ERG.w - 10) : setHills(HILLS * 100 - 20)],
+    [/\b(harder|hard|heavier|more|tougher|gear up|shift up|change up|higher gear|up a gear)\b/, () => ERG.on ? 'ERG ' + ERG.w + ' W' : $('hval').textContent, () => ERG.on ? setErg(true, ERG.w + 10) : setHills(HILLS * 100 + 20)],
     [/\b(flat|no hills|hills off)\b/, () => $('hval').textContent, () => setHills(0)],
     [/\b(full|real hills|all of it)\b/, () => $('hval').textContent, () => setHills(100)],
     ...(XMAS ? [[/\b(snow|snowing|snowy|christmas)\b/, 'Snow', () => setWeather('snow')]] : []),
